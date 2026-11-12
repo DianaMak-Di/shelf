@@ -1,0 +1,6 @@
+faster-whisper==1.2.1
+numpy==2.5.4
+ocrmac==1.0.1
+yt-dlp==2026.10.26
+fastembed==0.9.1
+telethon==1.45.0

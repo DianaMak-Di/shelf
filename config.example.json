@@ -1,0 +1,8 @@
+{
+  "language": "ru",
+  "llm": {
+    "provider": "claude-cli",
+    "strong": "sonnet",
+    "fast": "haiku"
+  }
+}

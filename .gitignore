@@ -1,0 +1,28 @@
+# personal data and generated files
+/data/
+/urls.txt
+/collections.json
+/tagmap.json
+/tagen.json
+/config.json
+*.session
+*.session-journal
+/saved_state.json
+/user_data_tiktok*.json
+/index.html
+/tmp/
+/test.txt
+*.log
+.design/
+# environments and builds
+.venv
+.venv.nosync/
+node_modules
+node_modules.nosync/
+ui/dist/
+/dist/
+__pycache__/
+.DS_Store
+.impeccable/
+.playwright-mcp/
+/CLAUDE.md
