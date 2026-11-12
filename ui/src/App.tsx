@@ -30,7 +30,7 @@ const fmtDate = (d?: string) => (d && d.length === 8 ? `${d.slice(6)}.${d.slice(
 const f = (s: string, v: Record<string, string | number> = {}) => s.replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''))
 
 const SOURCES: Record<string, string> = { instagram: 'Instagram', tiktok: 'TikTok', telegram: 'Telegram' }
-// same domains as reels.SOURCES; anything else is not added
+// same domains as shelf.SOURCES; anything else is not added
 const LINK = /^(https?:\/\/)?([\w-]+\.)*(instagram\.com|tiktok\.com|t\.me|telegram\.me)\/\S+/i
 
 const LangCtx = createContext<Lang>(null as unknown as Lang)
@@ -42,7 +42,7 @@ const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').match
 
 // Theme: 'system' follows the OS. index.html sets the class before first paint with the same key and rule.
 type Theme = 'light' | 'dark' | 'system'
-const THEME_KEY = 'reels-theme'
+const THEME_KEY = 'shelf-theme'
 const THEMES = { light: Sun, dark: Moon, system: Monitor }
 
 function useTheme() {
@@ -97,7 +97,7 @@ type Sync = { running: boolean; step: string; log: string; error: string }
 type Sources = { telegram: string | null; tiktok: number | null; later: string[] }
 
 // every POST carries this header: the server refuses posts without it, so other sites cannot post to it
-const post = (url: string, body: BodyInit) => fetch(url, { method: 'POST', headers: { 'X-Reels': '1' }, body })
+const post = (url: string, body: BodyInit) => fetch(url, { method: 'POST', headers: { 'X-Shelf': '1' }, body })
 const postJson = async (url: string, data: object) => {
   const r = await post(url, JSON.stringify(data))
   const j = await r.json().catch(() => ({ error: String(r.status) }))

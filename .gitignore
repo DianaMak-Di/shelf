@@ -26,3 +26,4 @@ __pycache__/
 .impeccable/
 .playwright-mcp/
 /CLAUDE.md
+/CHANGES.md

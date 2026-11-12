@@ -35,19 +35,19 @@ def test():
 
 def test_geocode():
     import json
-    import reels
+    import shelf
     asked = []
 
     def find(q):
         asked.append(q)
         return {"Cafe, Lisbon": (38.7, -9.1), "Tower": (1.0, 2.0), "Rua A 1, Lisbon": (5.0, 6.0), "Porto, Portugal": (41.1, -8.6)}.get(q)
     with tempfile.TemporaryDirectory() as d:
-        reels.D = Path(d)
+        shelf.D = Path(d)
         (Path(d) / "a.json").write_text(json.dumps({"id": "a", "places": [
             {"name": "Cafe", "city": "Lisbon", "country": "Portugal"}, "Tower", {"name": "Nowhere"},
             {"name": "Shop", "city": "Lisbon", "country": "Portugal", "address": "Rua A 1, Lisbon"},
             {"name": "Bakery", "city": "Porto", "country": "Portugal"}]}))
-        reels.geocode(find=find, pause=0)
+        shelf.geocode(find=find, pause=0)
         ps = json.loads((Path(d) / "a.json").read_text())["places"]
         assert (ps[0]["lat"], ps[0]["lng"]) == (38.7, -9.1)                 # found by the 2nd query
         assert asked[:2] == ["Cafe, Lisbon, Portugal", "Cafe, Lisbon"]
@@ -56,28 +56,28 @@ def test_geocode():
         assert ps[3]["lat"] == 5.0 and "approx" not in ps[3]                # address first
         assert ps[4]["lat"] == 41.1 and ps[4]["approx"] is True             # city centre as the last resort
         n = len(asked)
-        reels.geocode(find=find, pause=0)
+        shelf.geocode(find=find, pause=0)
         assert len(asked) == n                                              # marked/found places are not asked again
-        reels.geocode(force=True, find=find, pause=0)
+        shelf.geocode(force=True, find=find, pause=0)
         assert len(asked) > n
 
 
 def test_cities():
     import json
-    import reels
-    real = reels.llm.ask_json
-    reels.llm.ask_json = lambda *a, **kw: [{"city": "Валенсия", "country": "Испания"}] * 2
+    import shelf
+    real = shelf.llm.ask_json
+    shelf.llm.ask_json = lambda *a, **kw: [{"city": "Валенсия", "country": "Испания"}] * 2
     try:
         with tempfile.TemporaryDirectory() as d:
-            reels.D = Path(d)
+            shelf.D = Path(d)
             (Path(d) / "a.json").write_text(json.dumps({"id": "a", "places": [
                 {"name": "X", "city": "Valencia", "country": "Spain", "lat": 1.0, "lng": 2.0}, {"name": "Y", "city": "Валенсия", "country": ""}]}))
-            reels.cities()
+            shelf.cities()
             ps = json.loads((Path(d) / "a.json").read_text())["places"]
             assert {(q["city"], q["country"]) for q in ps} == {("Валенсия", "Испания")}   # one spelling
             assert ps[0]["lat"] == 1.0                                                   # coordinates survive
     finally:
-        reels.llm.ask_json = real
+        shelf.llm.ask_json = real
 
 
 if __name__ == "__main__":

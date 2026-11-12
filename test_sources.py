@@ -1,5 +1,5 @@
 """Self-check for link -> source / id:  python test_sources.py"""
-from reels import source_of, rid_of
+from shelf import source_of, rid_of
 
 cases = {
     "https://www.instagram.com/reel/ABCDEFGHIJK/": ("instagram", "ABCDEFGHIJK"),
@@ -22,7 +22,7 @@ print("ok", len(cases))
 # saved items: telegram Saved Messages entries, TikTok export links, links inside message text
 import json, tempfile
 from pathlib import Path
-from reels import _tiktok_favorites, _links
+from shelf import _tiktok_favorites, _links
 assert source_of("tgsaved:42") == "telegram" and rid_of("tgsaved:42") == "tgs_42"
 assert rid_of("https://www.tiktokv.com/share/video/7234567890123456789/") == "7234567890123456789"
 assert _links("look https://www.instagram.com/reel/ABC/?igsh=x, and https://youtube.com/x") == ["https://www.instagram.com/reel/ABC/"]

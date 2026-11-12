@@ -1,4 +1,4 @@
-"""Config + LLM access for reels.py: three providers, two model roles, retry with escalation.
+"""Config + LLM access for shelf.py: three providers, two model roles, retry with escalation.
 config.json (optional, see config.example.json):
   {"language": "ru", "llm": {"provider": "claude-cli|anthropic|openai", "strong": "...", "fast": "...",
                              "base_url": "...", "api_key_env": "..."}}

@@ -13,7 +13,7 @@ for v in 3.13 3.12 3.11; do command -v "python$v" >/dev/null && { PY="python$v";
 "$PY" -m venv .venv
 .venv/bin/pip install -q -r requirements.txt
 (cd ui && npm install --silent)
-.venv/bin/python reels.py build
+.venv/bin/python shelf.py build
 [ -f config.json ] || cp config.example.json config.json
 [ -f urls.txt ] || touch urls.txt
 echo "Done. Start:  .venv/bin/python server.py   ->  http://localhost:8765"

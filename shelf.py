@@ -1,17 +1,17 @@
-"""Saved reels -> transcripts + on-screen text + screenshots + hashtags -> searchable page.
-  python reels.py fetch urls.txt [--cookies chrome]  # audio + caption + speech transcript -> data/ (instagram, tiktok, t.me links)
-  python reels.py saved                               # new items from Telegram Saved Messages + TikTok favorites -> urls.txt
-  python reels.py tg-login                            # once, in a terminal: log in to Telegram for "saved"
-  python reels.py migrate                             # once: add "source" to reels saved before sources existed
-  python reels.py frames                              # screenshots + on-screen text (OCR) for each reel
-  python reels.py enrich                              # summary, hashtags, recipes/places/products/tips via the LLM (config.json)
-  python reels.py keys                                # key content per reel
-  python reels.py tagmap                              # squash specific hashtags into ~20 general ones
-  python reels.py places [--force]                    # once: add city/country/address to places of older reels
-  python reels.py cities                              # once: unify spelling of cities/countries (main language)
-  python reels.py geocode [--force]                   # lat/lng for places via Nominatim (OpenStreetMap), 1 request/s
-  python reels.py build                               # build the UI (ui/dist); run server.py to use it
-  python reels.py obsidian <vault folder> [--single]  # export to Markdown for Obsidian: note per reel + hubs; --single = one all.md
+"""Saved videos -> transcripts + on-screen text + screenshots + hashtags -> searchable page.
+  python shelf.py fetch urls.txt [--cookies chrome]  # audio + caption + speech transcript -> data/ (instagram, tiktok, t.me links)
+  python shelf.py saved                               # new items from Telegram Saved Messages + TikTok favorites -> urls.txt
+  python shelf.py tg-login                            # once, in a terminal: log in to Telegram for "saved"
+  python shelf.py migrate                             # once: add "source" to videos saved before sources existed
+  python shelf.py frames                              # screenshots + on-screen text (OCR) for each video
+  python shelf.py enrich                              # summary, hashtags, recipes/places/products/tips via the LLM (config.json)
+  python shelf.py keys                                # key content per video
+  python shelf.py tagmap                              # squash specific hashtags into ~20 general ones
+  python shelf.py places [--force]                    # once: add city/country/address to places of older videos
+  python shelf.py cities                              # once: unify spelling of cities/countries (main language)
+  python shelf.py geocode [--force]                   # lat/lng for places via Nominatim (OpenStreetMap), 1 request/s
+  python shelf.py build                               # build the UI (ui/dist); run server.py to use it
+  python shelf.py obsidian <vault folder> [--single]  # export to Markdown for Obsidian: note per video + hubs; --single = one all.md
 collections.json = {"collection_name": [shortcodes]}; collection names become the primary hashtags.
 """
 import filecmp, json, os, re, shutil, subprocess, sys, html, time, urllib.parse, urllib.request
@@ -70,14 +70,14 @@ def fetch(urls_file, cookies=None):
             print("SKIP (unsupported link)", url); continue
         out = D / f"{rid}.json"
         if out.exists():
-            continue  # already processed (ponytail: failed/old reels get retried every sync, ~2s each)
+            continue  # already processed (ponytail: failed/old videos get retried every sync, ~2s each)
         if url.startswith(TG_SAVED):
             # video from Saved Messages: no public link, download with the logged-in client; the mp4 and its info
             # stay in tmp/ for frames
             tg = tg or _tg()
             info = tg and _tg_download(tg, int(url[len(TG_SAVED):]), tmp / f"{rid}.mp4")
             if not info:
-                print("FAIL", url, "" if tg else "(telegram: run python reels.py tg-login)"); continue
+                print("FAIL", url, "" if tg else "(telegram: run python shelf.py tg-login)"); continue
             (tmp / f"{rid}.info.json").write_text(json.dumps(info, ensure_ascii=False))
             info_p, mp3 = None, tmp / f"{rid}.mp4"
         else:
@@ -117,7 +117,7 @@ def _cfg():
 
 
 def _tg():
-    """Logged-in Telethon client, or None until python reels.py tg-login has been run."""
+    """Logged-in Telethon client, or None until python shelf.py tg-login has been run."""
     c = _cfg().get("telegram") or {}
     if not c or not TG_SESSION.with_suffix(".session").exists():
         return None
@@ -297,14 +297,14 @@ def saved():
 
 
 def migrate_source():
-    """Once: write "source" into reels saved before sources existed (all were instagram). Run: python reels.py migrate"""
+    """Once: write "source" into videos saved before sources existed (all were instagram). Run: python shelf.py migrate"""
     n = 0
     for p in sorted(D.glob("*.json")):
         x = json.loads(p.read_text())
         if "source" not in x:
             x["source"] = source_of(x.get("url", "")) or "instagram"
             p.write_text(json.dumps(x, ensure_ascii=False, indent=1)); n += 1
-    print("migrate:", n, "reels")
+    print("migrate:", n, "videos")
 
 
 def frames(cookies=None):
@@ -431,7 +431,7 @@ def enrich(workers=6, force=False):
 
 
 def place(v, name=""):
-    """A place as stored by the UI: str (older reels) or dict -> {"name", "city", "country"}."""
+    """A place as stored by the UI: str (older videos) or dict -> {"name", "city", "country"}."""
     v = v if isinstance(v, dict) else {"name": v}
     s = lambda k: str(v.get(k) or "").strip()
     out = {"name": s("name") or name, "city": s("city"), "country": s("country")}
@@ -442,8 +442,8 @@ def place(v, name=""):
 
 
 def places(workers=6, force=False):
-    """One-off: add city/country/address to places stored as plain strings (older reels); --force redoes all places
-    (then run geocode --force). Run by hand: python reels.py places"""
+    """One-off: add city/country/address to places stored as plain strings (older videos); --force redoes all places
+    (then run geocode --force). Run by hand: python shelf.py places"""
     from concurrent.futures import ThreadPoolExecutor
 
     def one(p):
@@ -465,7 +465,7 @@ def places(workers=6, force=False):
 
 def cities():
     """One LLM call over the unique (city, country) pairs: rewrites them to one spelling in the main language, so the
-    same city is one group in the UI. Run by hand: python reels.py cities (ponytail: one call, fine up to a few hundred pairs)."""
+    same city is one group in the UI. Run by hand: python shelf.py cities (ponytail: one call, fine up to a few hundred pairs)."""
     files = {p: json.loads(p.read_text()) for p in sorted(D.glob("*.json"))}
     pairs = sorted({(q["city"], q["country"]) for x in files.values() for q in map(place, x.get("places", []))
                     if q["city"] or q["country"]})
@@ -490,7 +490,7 @@ def cities():
 def _nominatim(q):
     """(lat, lng) of the best match, None if nothing found; network errors raise OSError."""
     url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode({"q": q, "format": "json", "limit": 1})
-    req = urllib.request.Request(url, headers={"User-Agent": "reels-tool (personal, local)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "shelf (personal, local)"})
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
     return (float(d[0]["lat"]), float(d[0]["lon"])) if d else None
@@ -608,7 +608,7 @@ def export_items():
     return out
 
 
-OBS_START, OBS_END = "%% reels-tool:start %%", "%% reels-tool:end %%"  # Obsidian comments: hidden in preview
+OBS_START, OBS_END = "%% shelf:start %%", "%% shelf:end %%"  # Obsidian comments: hidden in preview
 SOURCE_NAMES = {"instagram": "Instagram", "tiktok": "TikTok", "telegram": "Telegram"}
 
 
@@ -670,7 +670,7 @@ def _read(p):
 def _note(path, fm, body):
     """Create or update a note. Ours: the block between the markers and the frontmatter keys in `fm` (empty list = [],
     so a key is never silently dropped); every other key and all text outside the block stay. `tags`: your own tags are
-    kept, the tags we generated last time (`reels_tags`) are replaced by the new ones. Markers gone or half gone -> a new
+    kept, the tags we generated last time (`shelf_tags`) are replaced by the new ones. Markers gone or half gone -> a new
     block is appended at the end, nothing you wrote is eaten. Written to a temp file and renamed. Returns
     "new" | "updated" | "same"."""
     old = _read(path) if path.exists() else None
@@ -679,9 +679,9 @@ def _note(path, fm, body):
     for k, v in fm.items():
         new[k] = v
         if k == "tags":  # generated tags: v; old tags that we did not generate are yours
-            prev = _items(was["reels_tags"]) if "reels_tags" in was else []
+            prev = _items(was["shelf_tags"]) if "shelf_tags" in was else []
             mine = [i for i in _items(was["tags"]) if i not in prev] if "tags" in was else []
-            new.update(tags=mine + [i for i in v if i not in mine], reels_tags=v)
+            new.update(tags=mine + [i for i in v if i not in mine], shelf_tags=v)
     block = f"{OBS_START}\n{body}\n{OBS_END}"
     j = rest.rfind(OBS_END)  # the last complete pair; a lone marker is just text
     i = rest.rfind(OBS_START, 0, j) if j >= 0 else -1
@@ -735,10 +735,10 @@ def _iso(x):
 
 
 def obsidian(vault, single=False, items=None):
-    """Export the database to Markdown for Obsidian (python reels.py obsidian <vault folder> [--single]).
-    Per reel reels/<title> - <id>.md (+ attachments/ with screenshots), hubs places/<city>.md, sources/<source>.md,
+    """Export the database to Markdown for Obsidian (python shelf.py obsidian <vault folder> [--single]).
+    Per video videos/<title> - <id>.md (+ attachments/ with screenshots), hubs places/<city>.md, sources/<source>.md,
     collections/<name>.md. --single: only all.md, no attachments, no hubs. Run again any time: only the generated block
-    between the %% markers and our frontmatter keys are rewritten; nothing is deleted (reels removed from the database
+    between the %% markers and our frontmatter keys are rewritten; nothing is deleted (videos removed from the database
     are only counted). Same data -> byte-identical files."""
     O, V = S["obs"], Path(vault).expanduser()
     items = sorted(items if items is not None else export_items(), key=lambda x: (x.get("upload_date") or "", x["id"]), reverse=True)
@@ -757,8 +757,8 @@ def obsidian(vault, single=False, items=None):
     cols = {}
     for c in sorted({c for x in items for c in x.get("collections", [])}):
         cols.setdefault(ck(c), c)
-    idx = {} if single else _obs_index(V / "reels")
-    target = {x["id"]: (idx[x["id"]].relative_to(V) if x["id"] in idx else Path("reels", f"{_safe(x.get('title') or x.get('caption'), x['id'])} - {x['id']}.md")).with_suffix("").as_posix() for x in items}
+    idx = {} if single else _obs_index(V / "videos")
+    target = {x["id"]: (idx[x["id"]].relative_to(V) if x["id"] in idx else Path("videos", f"{_safe(x.get('title') or x.get('caption'), x['id'])} - {x['id']}.md")).with_suffix("").as_posix() for x in items}
     alias = lambda s: " ".join(re.sub(r"[|\[\]]", " ", str(s).replace("%%", "% %").replace("<", "&lt;")).split())  # | [] %% would break a [[link|alias]]
     link = lambda t, s: alias(s) if single else f"[[{t}|{alias(s)}]]"  # --single has no hubs: plain text instead of links
     rlink = lambda x: link(target[x["id"]], x.get("title") or x["id"])
@@ -815,7 +815,7 @@ def obsidian(vault, single=False, items=None):
                  "cities": list(dict.fromkeys(link(f"places/{city[hk(p)]}", p["city"]) for p in q)),
                  "collections": list(dict.fromkeys(link(f"collections/{_safe(cols[ck(c)])}", c) for c in x.get("collections", []))),
                  "places": [p["name"] for p in x["places"]]}, body(x))
-        for key, q0 in hubs.items():  # city hubs: places with a map link, then the reels
+        for key, q0 in hubs.items():  # city hubs: places with a map link, then the videos
             here = [x for x in items if any(q["city"] and hk(q) == key for q in x["places"])]
             lines = [f"- **{_t(q['name'])}**" + (f" · [{O['map']}]({_osm(q)})" + (f" ({O['approx']})" if q.get("approx") else "") if "lat" in q else "") + f" — {rlink(x)}"
                      for x in here for q in x["places"] if q["city"] and hk(q) == key]
@@ -834,8 +834,8 @@ def obsidian(vault, single=False, items=None):
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst); copied += 1
         gone = len(set(idx) - {x["id"] for x in items})
-        print(f"obsidian: {len(items)} reels, screenshots copied: {copied}")
-        gone and print(f"obsidian: {gone} note(s) of reels no longer in the database were left in {V / 'reels'} (not deleted)")
+        print(f"obsidian: {len(items)} videos, screenshots copied: {copied}")
+        gone and print(f"obsidian: {gone} note(s) of videos no longer in the database were left in {V / 'videos'} (not deleted)")
     print(f"obsidian: {V}: {stat['new']} new, {stat['updated']} updated, {stat['same']} unchanged")
 
 
@@ -872,7 +872,7 @@ if __name__ == "__main__":
         tagmap()
     elif a[:1] == ["obsidian"]:
         args = [i for i in a[1:] if not i.startswith("--")]
-        obsidian(args[0], "--single" in a) if args else print("usage: python reels.py obsidian <vault folder> [--single]")
+        obsidian(args[0], "--single" in a) if args else print("usage: python shelf.py obsidian <vault folder> [--single]")
     elif a[:1] in ([], ["build"]):
         build()
     else:
