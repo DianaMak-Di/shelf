@@ -94,7 +94,7 @@ function ThemeSelect() {
 }
 
 type Sync = { running: boolean; step: string; log: string; error: string }
-type Sources = { telegram: string | null; tiktok: number | null; later: string[] }
+type Sources = { telegram: string | null; tiktok: number | null; later: string[]; obsidian: string | null }
 
 // every POST carries this header: the server refuses posts without it, so other sites cannot post to it
 const post = (url: string, body: BodyInit) => fetch(url, { method: 'POST', headers: { 'X-Shelf': '1' }, body })
@@ -272,6 +272,31 @@ function TikTokSetup({ src, reload }: { src: Sources; reload: () => void }) {
   )
 }
 
+function ObsidianSetup({ src }: { src: Sources }) {
+  const { ui } = useLang()
+  const [path, setPath] = useState(src.obsidian ?? '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [res, setRes] = useState('')
+  const run = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true); setErr(''); setRes('')
+    try {
+      const r = await postJson('api/obsidian', { path })
+      setRes(f(ui.obs_result, { n: r.new, u: r.updated, s: r.unchanged }))
+    } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <form onSubmit={run} className="grid gap-3">
+      <p className="text-sm text-muted-foreground">{ui.obs_desc}</p>
+      <Field label={ui.obs_path} placeholder="~/Documents/Vault/shelf" autoComplete="off" spellCheck={false} required value={path} onChange={(e) => setPath(e.target.value)} />
+      <Button type="submit" variant="outline" disabled={busy} className="w-fit">{busy ? ui.obs_exporting : ui.obs_export}</Button>
+      <p role="status" className="flex items-center gap-2 text-sm empty:hidden">{res && <><CircleCheck className="size-4 text-success" aria-hidden />{res}</>}</p>
+      {err && <p role="alert" className="text-sm text-destructive">{f(ui.ob_error, { e: err })}</p>}
+    </form>
+  )
+}
+
 function Onboarding() {
   const { ui } = useLang()
   const [src, setSrc] = useState<Sources | null>(null)
@@ -309,6 +334,7 @@ function Onboarding() {
           {src && <>
             {section('telegram', ui.tg_title, !!src.telegram, <TelegramSetup src={src} reload={done} />)}
             {section('tiktok', ui.tt_title, src.tiktok !== null, <TikTokSetup src={src} reload={done} />)}
+            {section('obsidian', ui.obs_title, true, <ObsidianSetup src={src} />)}
           </>}
           <DialogFooter className="items-center gap-2">
             {changed && <p role="status" className="me-auto text-sm text-muted-foreground">{ui.ob_sync_hint}</p>}

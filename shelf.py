@@ -222,7 +222,7 @@ def sources_status():
     f = ROOT / "user_data_tiktok.json"
     c = _cfg()
     return {"telegram": (c.get("telegram") or {}).get("user") if TG_SESSION.with_suffix(".session").exists() else None,
-            "tiktok": len(_tiktok_favorites(f)) if f.exists() else None, "later": c.get("later", [])}
+            "tiktok": len(_tiktok_favorites(f)) if f.exists() else None, "later": c.get("later", []), "obsidian": c.get("obsidian")}
 
 
 def _is_video(m):
@@ -739,10 +739,11 @@ def obsidian(vault, single=False, items=None):
     Per video videos/<title> - <id>.md (+ attachments/ with screenshots), hubs places/<city>.md, sources/<source>.md,
     collections/<name>.md. --single: only all.md, no attachments, no hubs. Run again any time: only the generated block
     between the %% markers and our frontmatter keys are rewritten; nothing is deleted (videos removed from the database
-    are only counted). Same data -> byte-identical files."""
+    are only counted). Same data -> byte-identical files. Returns {new, updated, same, gone} (gone = notes left behind)."""
     O, V = S["obs"], Path(vault).expanduser()
     items = sorted(items if items is not None else export_items(), key=lambda x: (x.get("upload_date") or "", x["id"]), reverse=True)
     stat = {"new": 0, "updated": 0, "same": 0}
+    gone = 0
 
     def put(path, fm, body):
         stat[_note(path, fm, body)] += 1
@@ -837,6 +838,7 @@ def obsidian(vault, single=False, items=None):
         print(f"obsidian: {len(items)} videos, screenshots copied: {copied}")
         gone and print(f"obsidian: {gone} note(s) of videos no longer in the database were left in {V / 'videos'} (not deleted)")
     print(f"obsidian: {V}: {stat['new']} new, {stat['updated']} updated, {stat['same']} unchanged")
+    return {**stat, "gone": gone}
 
 
 def build():

@@ -20,7 +20,8 @@ with tempfile.TemporaryDirectory() as d:
     (d / "thumbs").mkdir(); (d / "thumbs" / "DQ-abc_1_0.jpg").write_bytes(b"jpg1")
     shelf.T = d / "thumbs"
     V = d / "vault"
-    obsidian(V, items=[x])
+    r = obsidian(V, items=[x])
+    assert r == {"new": 4, "updated": 0, "same": 0, "gone": 0}, r  # note + city + source + collection
     note = V / "videos" / f"{_safe(x['title'])} - DQ-abc_1.md"
     assert note.exists(), list((V / "videos").iterdir())
     text = note.read_text()
@@ -41,7 +42,8 @@ with tempfile.TemporaryDirectory() as d:
     edited = text.replace("\ntags:\n", '\nrating: 5\ntags:\n  - "mine"\n', 1)
     edited = edited.replace(shelf.OBS_START, "МОЙ ЗАГОЛОВОК\n" + shelf.OBS_START).replace(shelf.OBS_END, shelf.OBS_END + "\n\nМОЯ ЗАМЕТКА")
     note.write_text(edited)
-    obsidian(V, items=[x])
+    r = obsidian(V, items=[x])
+    assert r["new"] == 0 and r["same"] == 4, r
     assert note.read_text() == edited, "regenerating unchanged data must not touch the note"
     x2 = {**x, "title": "Новый заголовок", "summary": "Новое summary", "tags": ["рецепты"]}
     obsidian(V, items=[x2])

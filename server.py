@@ -1,6 +1,6 @@
 """Local server for the Shelf UI:  python server.py  ->  http://localhost:8765
 GET /api/reels, GET /api/lang (language + UI texts), GET /api/sync (status), POST /api/sync {"urls":[...]} (add links + process everything new).
-Onboarding: GET /api/sources, POST /api/telegram/<code|sign_in|password|logout>, POST /api/tiktok (export file), POST /api/later {"item"}.
+Onboarding: GET /api/sources (+ saved Obsidian folder), POST /api/obsidian {"path"} (save the folder, export), POST /api/telegram/<code|sign_in|password|logout>, POST /api/tiktok (export file), POST /api/later {"item"}.
 POSTs need the header X-Shelf: 1. Any request needs Host localhost:<port> or 127.0.0.1:<port> (DNS rebinding)."""
 import json, subprocess, urllib.parse, threading, mimetypes
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -9,7 +9,7 @@ import shelf
 
 ROOT = Path(__file__).parent
 PY = str(ROOT / ".venv/bin/python")
-state = {"running": False, "step": "", "log": "", "error": ""}
+state = {"running": False, "exporting": False, "step": "", "log": "", "error": ""}
 lock = threading.Lock()
 S = shelf.S
 STEPS = list(zip(S["steps"], [["saved"], ["fetch", "urls.txt"], ["frames"], ["enrich"], ["geocode"], ["keys"], ["tagmap"]]))
@@ -86,10 +86,27 @@ class H(BaseHTTPRequestHandler):
             later = sorted(set(shelf._cfg().get("later", [])) | {body.get("item")} - {None})
             shelf._save_cfg(later=later)
             return self.send(shelf.sources_status())
+        if self.path == "/api/obsidian":
+            ui = S["ui"]
+            p = Path(str(body.get("path", "")).strip()).expanduser()
+            if not (p.is_absolute() and p.is_dir()):
+                return self.send({"error": ui["ob_path_err"]}, code=400)
+            with lock:  # one export at a time, never next to a sync
+                if state["running"] or state["exporting"]:
+                    return self.send({"error": ui["ob_busy"]}, code=409)
+                state["exporting"] = True
+            try:  # runs in this request's thread; other requests are served by their own
+                shelf._save_cfg(obsidian=str(p))
+                r = shelf.obsidian(p)
+            except OSError as e:
+                return self.send({"error": str(e)}, code=400)
+            finally:
+                state["exporting"] = False
+            return self.send({"new": r["new"], "updated": r["updated"], "unchanged": r["same"], "left": r["gone"]})
         if self.path != "/api/sync":
             return self.send({"error": "not found"}, code=404)
         with lock:
-            if state["running"]:
+            if state["running"] or state["exporting"]:
                 return self.send(state, code=409)
             state.update(running=True, step=S["start"], log="", error="")
         threading.Thread(target=sync, args=(body.get("urls", []),), daemon=True).start()
