@@ -13,7 +13,7 @@
 
 ## Требования
 
-Только macOS (OCR работает через Apple Vision и `ocrmac`), Python 3, Node.js, ffmpeg и одна LLM: `claude` CLI (по умолчанию), ключ Anthropic API или любой OpenAI-совместимый эндпоинт.
+Только macOS (OCR работает через Apple Vision и `ocrmac`), Python 3.11–3.13 (на более новых нет колёс `onnxruntime`), Node.js, ffmpeg и одна LLM: `claude` CLI (по умолчанию), ключ Anthropic API или любой OpenAI-совместимый эндпоинт.
 
 ## Установка
 

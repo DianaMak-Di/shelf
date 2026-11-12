@@ -2,7 +2,7 @@
 import json, re, tempfile
 from pathlib import Path
 import reels
-from reels import obsidian, _fm_split, _items, _safe, _tag
+from reels import obsidian, _fm_split, _items, _safe, _t, _tag
 
 x = {"id": "DQ-abc_1", "source": "instagram", "url": "https://instagram.com/p/DQ-abc_1/", "author": 'Ann "A": b',
      "title": 'Паста: рецепт / "быстро" #1?', "summary": "Паста за 10 минут: 200 г, %% и #хэштег", "upload_date": "20251109",
@@ -12,6 +12,7 @@ x = {"id": "DQ-abc_1", "source": "instagram", "url": "https://instagram.com/p/DQ
                 {"name": "Без города", "city": "", "country": ""}]}
 
 assert _safe('a/b:c*"d"#e') == "a b c d e" and _safe("...", "id") == "id"
+assert _t("![x](https://evil/a.png) <img src=https://evil/b.png>") == "!\\[x](https://evil/a.png) &lt;img src=https://evil/b.png>"  # no external loads from video text
 assert [_tag(t) for t in ("two words", "2025", "рецепты", "#ai")] == ["two_words", "t2025", "рецепты", "ai"]
 
 with tempfile.TemporaryDirectory() as d:

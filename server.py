@@ -1,7 +1,7 @@
 """Local server for the reels UI:  python server.py  ->  http://localhost:8765
 GET /api/reels, GET /api/lang (language + UI texts), GET /api/sync (status), POST /api/sync {"urls":[...]} (add links + process everything new).
 Onboarding: GET /api/sources, POST /api/telegram/<code|sign_in|password|logout>, POST /api/tiktok (export file), POST /api/later {"item"}.
-POSTs need the header X-Reels: 1."""
+POSTs need the header X-Reels: 1. Any request needs Host localhost:<port> or 127.0.0.1:<port> (DNS rebinding)."""
 import json, subprocess, urllib.parse, threading, mimetypes
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -39,7 +39,15 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code); self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
+    def allowed(self, post=False):
+        # DNS rebinding: a page on evil.com rebound to 127.0.0.1 still sends Host: evil.com (and Origin on POST)
+        hosts = {f"localhost:{self.server.server_address[1]}", f"127.0.0.1:{self.server.server_address[1]}"}
+        origin = self.headers.get("Origin")
+        return self.headers.get("Host") in hosts and not (post and origin and origin not in {f"http://{h}" for h in hosts})
+
     def do_GET(self):
+        if not self.allowed():
+            return self.send({"error": "forbidden"}, code=403)
         path = self.path.split("?")[0]
         if path == "/api/reels":
             return self.send(reels.export_items())
@@ -62,7 +70,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         # custom header = browsers send a CORS preflight first, which this server never answers: other sites open in
         # the browser cannot post here (log in to Telegram, start syncs)
-        if self.headers.get("X-Reels") != "1":
+        if self.headers.get("X-Reels") != "1" or not self.allowed(post=True):
             return self.send({"error": "forbidden"}, code=403)
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path == "/api/tiktok":

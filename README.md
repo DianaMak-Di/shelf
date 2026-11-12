@@ -13,7 +13,7 @@ Everything runs locally. English | [Русский](README.ru.md)
 
 ## Requirements
 
-macOS only (OCR uses Apple Vision through `ocrmac`), Python 3, Node.js, ffmpeg, and one LLM: the `claude` CLI (default), an Anthropic API key, or any OpenAI-compatible endpoint.
+macOS only (OCR uses Apple Vision through `ocrmac`), Python 3.11–3.13 (newer versions lack `onnxruntime` wheels), Node.js, ffmpeg, and one LLM: the `claude` CLI (default), an Anthropic API key, or any OpenAI-compatible endpoint.
 
 ## Setup
 

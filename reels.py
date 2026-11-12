@@ -626,7 +626,8 @@ def _tag(t):
 
 def _t(s):
     """Reel text for a note: no accidental #tags from captions, no [[links]], no %% that would end the comment block."""
-    return re.sub(r"(?<![\w&\\])#(?=\w)", r"\\#", str(s or "").replace("%%", "% %").replace("[[", "\\[\\[")).strip()
+    s = str(s or "").replace("%%", "% %").replace("[[", "\\[\\[").replace("![", "!\\[").replace("<", "&lt;")  # ![](url) and raw HTML would load external resources
+    return re.sub(r"(?<![\w&\\])#(?=\w)", r"\\#", s).strip()
 
 
 def _yaml(k, v):
@@ -758,7 +759,7 @@ def obsidian(vault, single=False, items=None):
         cols.setdefault(ck(c), c)
     idx = {} if single else _obs_index(V / "reels")
     target = {x["id"]: (idx[x["id"]].relative_to(V) if x["id"] in idx else Path("reels", f"{_safe(x.get('title') or x.get('caption'), x['id'])} - {x['id']}.md")).with_suffix("").as_posix() for x in items}
-    alias = lambda s: " ".join(re.sub(r"[|\[\]]", " ", str(s).replace("%%", "% %")).split())  # | [] %% would break a [[link|alias]]
+    alias = lambda s: " ".join(re.sub(r"[|\[\]]", " ", str(s).replace("%%", "% %").replace("<", "&lt;")).split())  # | [] %% would break a [[link|alias]]
     link = lambda t, s: alias(s) if single else f"[[{t}|{alias(s)}]]"  # --single has no hubs: plain text instead of links
     rlink = lambda x: link(target[x["id"]], x.get("title") or x["id"])
     h = 2 if single else 1
