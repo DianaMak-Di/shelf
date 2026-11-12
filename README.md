@@ -10,6 +10,7 @@ Everything runs locally. English | [Русский](README.ru.md)
 - Cookies are read locally by `yt-dlp` (`--cookies-from-browser`). This tool never sends them anywhere.
 - Reel text (caption, speech, on-screen text) is sent to the LLM provider you configure. With a local model (Ollama, LM Studio) nothing leaves your machine.
 - Names of places are sent to Nominatim (OpenStreetMap) to find coordinates for the map, and the map loads tiles from openstreetmap.org.
+- The first search downloads a small multilingual model (`paraphrase-multilingual-MiniLM-L12-v2`) from Hugging Face. After that, search runs locally.
 
 ## Requirements
 
@@ -61,6 +62,16 @@ Copy `config.example.json` to `config.json` (`setup.sh` does it). Without a file
 - If an answer cannot be parsed, the call is retried right away: `fast` -> `strong` -> `strong` (`strong` x3 for strong steps). If all fail, the reel is skipped and retried on the next sync.
 - Changing the provider only affects new reels. Existing summaries and tags stay as they are.
 
+## Export to Obsidian
+
+```bash
+python reels.py obsidian ~/Documents/MyVault/reels-tool
+```
+
+Writes Markdown into the folder you give: a note per reel in `reels/`, pages for cities in `places/`, for sources in `sources/` and for collections in `collections/`, and screenshots in `attachments/`. Export into a subfolder of your vault, not its root. With `--single` you get one `all.md` with every reel: no hubs, no screenshots.
+
+Run it again any time. Only the block between `%% reels-tool:start %%` and `%% reels-tool:end %%` and the properties the tool owns are rewritten. Your text outside the block and your own properties stay. The tags the tool generates go to `reels_tags` and into `tags`; tags you added to `tags` are kept. Nothing is deleted: notes of reels that left the database stay where they are. You can rename a note or move it within `reels/`. A note moved out of `reels/` is treated as gone, and the export creates it again.
+
 ## Commands
 
 ```
@@ -76,6 +87,7 @@ python reels.py places                              # once: add city/country to 
 python reels.py cities                              # once: unify spelling of cities/countries in the main language
 python reels.py geocode [--force]                   # coordinates for the map (Nominatim, 1 request/s)
 python reels.py build                               # build the UI
+python reels.py obsidian <vault folder> [--single]   # export to Markdown for Obsidian
 python test_llm.py                                  # self-check for retries and config
 python test_sources.py                              # self-check: link -> source and id
 ```
