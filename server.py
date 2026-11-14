@@ -2,17 +2,18 @@
 GET /api/reels, GET /api/lang (language + UI texts), GET /api/sync (status), POST /api/sync {"urls":[...]} (add links + process everything new).
 Onboarding: GET /api/sources (+ saved Obsidian folder), POST /api/obsidian {"path"} (save the folder, export), POST /api/telegram/<code|sign_in|password|logout>, POST /api/tiktok (export file), POST /api/later {"item"}.
 POSTs need the header X-Shelf: 1. Any request needs Host localhost:<port> or 127.0.0.1:<port> (DNS rebinding)."""
-import json, subprocess, urllib.parse, threading, mimetypes
+import json, subprocess, time, urllib.parse, threading, mimetypes
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 import shelf
 
 ROOT = Path(__file__).parent
 PY = str(ROOT / ".venv/bin/python")
-state = {"running": False, "exporting": False, "step": "", "log": "", "error": ""}
 lock = threading.Lock()
 S = shelf.S
+state = {"running": False, "exporting": False, "step": "", "log": "", "error": "", "n": 0, "total": len(S["steps"]), "started": 0}
 STEPS = list(zip(S["steps"], [["saved"], ["fetch", "urls.txt"], ["frames"], ["enrich"], ["geocode"], ["keys"], ["tagmap"]]))
+state["steps"] = [name for name, _ in STEPS]
 
 
 def sync(urls):
@@ -22,11 +23,15 @@ def sync(urls):
         add = [u.split("?")[0] for u in urls if u.split("?")[0] not in known]
         if add or not uf.exists():
             uf.write_text("\n".join(known + add) + "\n")
-        for name, args in STEPS:
-            state["step"] = name
+        failed = None  # later steps still run (manual links work when Telegram fails); the first failure is reported
+        for i, (name, args) in enumerate(STEPS, 1):
+            state.update(step=name, n=i)
             r = subprocess.run([PY, "shelf.py", *args], cwd=ROOT, capture_output=True, text=True)
             state["log"] = (r.stdout + r.stderr)[-600:]
-        state["step"] = S["done"]
+            if r.returncode and not failed:
+                why = next((l.strip() for l in reversed(r.stderr.splitlines()) if l.strip()), f"exit {r.returncode}")
+                failed = dict(step=name, n=i, error=why[-200:])
+        state.update(failed or {"step": S["done"]})
     except Exception as e:  # noqa: BLE001
         state["error"] = str(e)
     finally:
@@ -108,7 +113,7 @@ class H(BaseHTTPRequestHandler):
         with lock:
             if state["running"] or state["exporting"]:
                 return self.send(state, code=409)
-            state.update(running=True, step=S["start"], log="", error="")
+            state.update(running=True, step=S["start"], log="", error="", n=0, total=len(STEPS), started=int(time.time()))
         threading.Thread(target=sync, args=(body.get("urls", []),), daemon=True).start()
         self.send(state)
 

@@ -42,6 +42,8 @@
 | ring | `--ring` | `oklch(.55 .21 262)` | `oklch(.74 .13 262)` | кольцо фокуса, без прозрачности |
 | danger | `--destructive` | `oklch(.55 .22 27)` #d40c1a | `oklch(.72 .17 22)` #fd7273 | ошибки, «Отключить» |
 | success | `--success` (новая) | `oklch(.52 .11 155)` #267b4c | `oklch(.76 .14 155)` #5ccb89 | «Подключено», «Готово» в синке |
+| mark | `--mark` (новая) | `color-mix(in oklab, var(--primary) 16%, var(--card))` ≈ #dbe8fe | `color-mix(in oklab, var(--primary) 30%, var(--card))` ≈ #203253 | подсветка совпадений с поиском (`<mark>`, бейдж совпадений в деталях); всегда вместе с `font-semibold`, см. `.design/specs/details.md` п. 4 |
+| seg-on | `--seg-on` (новая) | `oklch(1 0 0)` | `oklch(.32 .01 260)` | активный сегмент переключателя «Видео / Места» на дорожке `sunken` (в тёмной surface .22 темнее дорожки .26, поэтому отдельный токен) |
 
 `--accent`/`--accent-foreground` shadcn использует для hover и подсветки с клавиатуры пунктов меню: светлая тема `--accent` = sunken, тёмная `oklch(.32 .01 260)` (на `popover` `oklch(.25 .01 260)` даёт заметную подсветку; sunken `.26` давал 1.02:1). Имя `--accent` в shadcn не равно нашему accent, поэтому акцент в коде это `--primary`.
 
@@ -65,6 +67,11 @@
 | ring / surface | 5.06 | 7.45 | 3.0 |
 | accent / bg (заливка кнопки как форма) | — | 3.75 | 3.0 |
 | выбранный тег: bg-на-text | 17.22 | 16.74 | 4.5 |
+| text / seg-on (активный сегмент) | 17.72 | 11.29 | 4.5 |
+| text / mark (подсветка в тексте, бейдж) | 14.33 | 11.39 | 4.5 |
+| text-muted / mark (подсветка в превью) | 4.85 | 5.16 | 4.5 |
+
+`mark` на `card` 1.24 (свет) и 1.35 (тёмная): фон подсветки не отличим как признак, поэтому `<mark>` всегда жирный (WCAG 1.4.1). Значения пар `mark` из `details.md` п. 4.
 
 `border` на surface 1.31: только декор (рамка карточки, разделитель), никогда граница поля.
 
@@ -90,7 +97,8 @@ Inter Variable (`@fontsource-variable/inter`), веса 400 / 500 / 600. Ниж�
 | body-sm | `text-sm` | 14px / .875rem | 1.5 | 400, 500 | текст карточки, кнопки, меню, поля на десктопе |
 | body | `text-base` | 16px / 1rem | 1.5 | 400, 600 | заголовок карточки (600, межстрочный 1.4), поля на телефоне, длинный текст в деталях |
 | heading | `text-lg` | 18px / 1.125rem | 1.3 | 600 | город в «Местах», заголовок окна |
-| title | `text-xl` | 20px / 1.25rem | 1.3 | 600 | h1 страницы |
+| title | `text-xl` | 20px / 1.25rem | 1.3 | 600 | h1 страницы («Shelf») |
+| display | `text-2xl` | 24px / 1.5rem | 1.2 | 600, трекинг `-0.01em` | заголовок панели деталей видео |
 
 - Убрать `text-[15px]` с body: корень 16px, текст интерфейса 14px через классы.
 - Убрать `text-[0.8rem]` из `button` size sm: 12px (caption) или 14px.
@@ -142,7 +150,7 @@ Inter Variable (`@fontsource-variable/inter`), веса 400 / 500 / 600. Ниж�
 
 - Под тенью `border: 1px solid transparent`, чтобы в forced-colors осталась граница.
 - Обложки: `outline: 1px solid oklch(0 0 0 / .1); outline-offset: -1px` (тёмная `oklch(1 0 0 / .1)`).
-- Кнопка «play» на обложке: `oklch(1 0 0 / .9)` и `oklch(.21 .01 260)` в обеих темах (поверх фото, тема не важна) — единственное разрешённое исключение из токенов, вынести в `--on-media`.
+- Кнопка «play» на обложке: `oklch(1 0 0 / .9)` и `oklch(.21 .01 260)` в обеих темах (поверх фото, тема не важна) — единственное разрешённое исключение из токенов: фон `--on-media`, значок `--on-media-fg` (одинаковые в обеих темах, в `.dark` не переопределять).
 - Заглушка без обложки: `sunken` + иконка `text-muted`, без градиента slate.
 
 ## Анимации
@@ -190,6 +198,9 @@ Inter Variable (`@fontsource-variable/inter`), веса 400 / 500 / 600. Ниж�
   --input: oklch(.64 .01 260);
   --ring: oklch(.55 .21 262);
   --on-media: oklch(1 0 0 / .9);
+  --on-media-fg: oklch(.21 .01 260);
+  --seg-on: oklch(1 0 0);
+  --mark: color-mix(in oklab, var(--primary) 16%, var(--card));
 }
 .dark {
   color-scheme: dark;
@@ -207,10 +218,12 @@ Inter Variable (`@fontsource-variable/inter`), веса 400 / 500 / 600. Ниж�
   --border: oklch(.31 .01 260);
   --input: oklch(.52 .012 260);
   --ring: oklch(.74 .13 262);
+  --seg-on: oklch(.32 .01 260);
+  --mark: color-mix(in oklab, var(--primary) 30%, var(--card));
 }
 ```
 
-В `@theme inline` добавить `--color-accent-text`, `--color-success`; удалить `--color-sidebar-*`, `--color-chart-*`. В `@layer base` заменить `outline-ring/50` на кольцо `:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px }`, в shadcn-компонентах `ring-ring/50` → `ring-ring`.
+В `@theme inline` добавить `--color-accent-text`, `--color-success`, `--color-seg-on`, `--color-mark`, `--color-on-media`, `--color-on-media-fg`; удалить `--color-sidebar-*`, `--color-chart-*`. В `@layer base` заменить `outline-ring/50` на кольцо `:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px }`, в shadcn-компонентах `ring-ring/50` → `ring-ring`.
 
 ## Решения
 
@@ -228,5 +241,12 @@ Inter Variable (`@fontsource-variable/inter`), веса 400 / 500 / 600. Ниж�
 | Развилка | Выбрано | Почему |
 |---|---|---|
 | Шрифт | Inter Variable вместо Geist | 2026-11-12 шрифт Inter — выбор автора |
+| Главный экран: раскладка | вариант A, боковая панель фильтров (коллекции, источник, теги); на телефоне нижний лист | все фильтры видны и работают в один клик; выбор по `.design/sketches/main-screen/` |
+| Главный экран: индикатор синка | полоса под шапкой из варианта B (шаг N из 7, название шага, время, деления; ошибка и итог в той же полосе) | синк длится минутами, прогресс виден без клика |
+| Токен `--seg-on` | утверждён: свет `oklch(1 0 0)`, тёмная `oklch(.32 .01 260)` | активный сегмент должен быть светлее дорожки в обеих темах |
+| Детали видео | панель сбоку поверх списка, заголовок роли display 24/600, подсветка совпадений токеном `--mark` | список остаётся на месте; спецификация `.design/specs/details.md` |
+| Места | список рядом с картой | спецификация `.design/specs/places.md` |
+
+Спецификация главного экрана: `.design/specs/main-screen.md`. Отклонено для главного экрана: панель инструментов над лентой как раскладка (B), вкладки коллекций и компактная лента (C), прогресс в кнопке синка (A), плашка синка внизу (C).
 
 Отклонено: чернильный и оранжевый акцент, цветные теги по хешу, нейтральный серый и OLED в тёмной теме, список и компактный список.

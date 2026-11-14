@@ -17,7 +17,10 @@
     --color-accent: var(--accent);
     --color-accent-text: var(--accent-text);
     --color-success: var(--success);
+    --color-seg-on: var(--seg-on);
+    --color-mark: var(--mark);
     --color-on-media: var(--on-media);
+    --color-on-media-fg: var(--on-media-fg);
     --color-overlay: var(--overlay);
     --color-muted-foreground: var(--muted-foreground);
     --color-muted: var(--muted);
@@ -64,6 +67,9 @@
   --input: oklch(.64 .01 260);
   --ring: oklch(.55 .21 262);
   --on-media: oklch(1 0 0 / .9);
+  --on-media-fg: oklch(.21 .01 260);
+  --seg-on: oklch(1 0 0);
+  --mark: color-mix(in oklab, var(--primary) 16%, var(--card));
   --overlay: oklch(0 0 0 / .3);
   --elev-1: 0 1px 2px oklch(0 0 0 / .06), 0 4px 16px oklch(0 0 0 / .08);
   --elev-2: 0 8px 32px oklch(0 0 0 / .16);
@@ -84,6 +90,8 @@
   --border: oklch(.31 .01 260);
   --input: oklch(.52 .012 260);
   --ring: oklch(.74 .13 262);
+  --seg-on: oklch(.32 .01 260);
+  --mark: color-mix(in oklab, var(--primary) 30%, var(--card));
   --overlay: oklch(0 0 0 / .6);
   --elev-1: 0 0 #0000;
   --elev-2: 0 0 #0000;
@@ -113,7 +121,7 @@
 .leaflet-bar a { background: var(--card); color: var(--foreground); border-bottom-color: var(--border); }
 .leaflet-bar a:hover, .leaflet-bar a:focus { background: var(--muted); }
 .leaflet-bar a.leaflet-disabled { background: var(--card); color: var(--muted-foreground); }
-.leaflet-control-attribution { background: color-mix(in oklch, var(--card) 85%, transparent) !important; color: var(--muted-foreground); }
+.leaflet-control-attribution { background: color-mix(in oklch, var(--card) 85%, transparent) !important; color: var(--muted-foreground); font-size: .75rem; }
 .leaflet-popup-content-wrapper { background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--elev-1); }
 .leaflet-popup-tip { background: var(--popover); box-shadow: none; }
 .leaflet-popup-content { margin: 12px 16px; font-size: .875rem; line-height: 1.5; }
@@ -121,3 +129,6 @@
 .leaflet-container a.leaflet-popup-close-button:hover, .leaflet-container a.leaflet-popup-close-button:focus { color: var(--foreground); }
 .map-marker { stroke: oklch(1 0 0); stroke-width: 2; fill: var(--primary); fill-opacity: .85; }
 .map-marker--approx { stroke: var(--primary); fill-opacity: .2; stroke-dasharray: 3 3; }
+/* selected place: dark outline (tiles are light in both themes, so not --foreground); the dash of an approximate marker stays */
+.map-marker--sel { stroke: oklch(.21 .01 260); stroke-width: 3; fill-opacity: 1; }
+.map-marker--approx.map-marker--sel { fill-opacity: .2; }

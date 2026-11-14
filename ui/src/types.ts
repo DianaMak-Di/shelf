@@ -10,5 +10,5 @@ export type Reel = {
 
 export type Lang = {
   language: string; kind_order: string[]; hidden_kinds: string[]
-  ui: Record<string, string> & { sorts: Record<string, string> }
+  ui: Record<string, string> & { sorts: Record<string, string>; d_kinds: string[]; places_n: Record<string, string>; videos_n: Record<string, string> }
 }

@@ -80,6 +80,25 @@ function DialogContent({
   )
 }
 
+// Side panel (details.md): 600px at the right edge from 640px up, full screen below. Own scroll; the header is sticky inside.
+function DialogPanel({ className, children, ...props }: DialogPrimitive.Popup.Props) {
+  return (
+    <DialogPortal>
+      <DialogOverlay className="max-sm:hidden" />
+      <DialogPrimitive.Popup
+        data-slot="dialog-panel"
+        className={cn(
+          "fixed inset-y-0 end-0 z-50 h-dvh w-full overflow-y-auto overscroll-contain bg-card text-card-foreground outline-none sm:w-[600px] sm:border-s sm:shadow-dialog ease-[cubic-bezier(0.2,0,0,1)] data-open:duration-200 data-closed:duration-150 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:slide-in-from-end data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:slide-out-to-end",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </DialogPrimitive.Popup>
+    </DialogPortal>
+  )
+}
+
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -154,6 +173,7 @@ export {
   DialogFooter,
   DialogHeader,
   DialogOverlay,
+  DialogPanel,
   DialogPortal,
   DialogTitle,
   DialogTrigger,
