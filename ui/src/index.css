@@ -88,7 +88,7 @@
   --success: oklch(.76 .14 155);
   --accent: oklch(.32 .01 260);
   --border: oklch(.31 .01 260);
-  --input: oklch(.52 .012 260);
+  --input: oklch(.55 .012 260);
   --ring: oklch(.74 .13 262);
   --seg-on: oklch(.32 .01 260);
   --mark: color-mix(in oklab, var(--primary) 30%, var(--card));

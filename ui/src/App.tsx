@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { AnimatePresence, domAnimation, LazyMotion, m, useReducedMotion } from 'motion/react'
 import L from 'leaflet'
 import type { Lang, Reel } from '@/types'
 
@@ -27,6 +28,8 @@ const SORTS: Record<string, (a: Reel, b: Reel) => number> = {
   author: (a, b) => a.author.localeCompare(b.author),
   title: (a, b) => (a.title ?? '').localeCompare(b.title ?? ''),
 }
+// tag / collection names from the data may be empty strings: they would draw an empty chip
+const real = (a: string[]) => a.filter((s) => s.trim())
 const fmtDate = (d?: string) => (d && d.length === 8 ? `${d.slice(6)}.${d.slice(4, 6)}.${d.slice(0, 4)}` : '')
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 const f = (s: string, v: Record<string, string | number> = {}) => s.replace(/\{(\w+)\}/g, (_, k) => String(v[k] ?? ''))
@@ -123,7 +126,9 @@ function useReels() {
     .then((l: Reel[]) => { setReels(l); setState('ok'); return l })
     .catch(() => { setState('error'); return null }), [])
   useEffect(() => { load() }, [load])
-  return { reels, load, state }
+  // "Retry": back to skeletons until the server answers. `load` stays as is: the sync calls it and needs no skeletons.
+  const retry = useCallback(() => { setState('loading'); load() }, [load])
+  return { reels, load, retry, state }
 }
 
 // Sync state lives in Main: the strip, the header button and the command menu share it.
@@ -134,13 +139,16 @@ function useSync(reload: () => Promise<Reel[] | null>, knownIds: () => Set<strin
   const [hidden, setHidden] = useState(false)
   const before = useRef(new Set<string>())
   const failed = (error: string): Sync => ({ running: false, step: '', log: '', error })
+  const starting = useRef(false) // a double click must not send a second POST: it would get 409 and overwrite "running"
   const start = async (urls: string[]) => {
+    if (starting.current) return
+    starting.current = true
     before.current = knownIds()
     setHidden(false); setFin(null)
     try {
       const r = await post('api/sync', JSON.stringify({ urls }))
       setSt(r.status === 409 ? failed(ui.ob_busy.replace(/\.$/, '')) : await r.json()) // 409: a sync or an Obsidian export is already running
-    } catch { setSt(failed(ui.no_server)) }
+    } catch { setSt(failed(ui.no_server)) } finally { starting.current = false }
   }
   // a reload during a sync keeps the strip: ask once, the polling below takes over
   useEffect(() => {
@@ -200,14 +208,16 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
   const toggle = (label: string) => (
     <Button variant="ghost" aria-expanded={more} onClick={() => setMore(!more)} className="pointer-coarse:h-11">{more ? ui.collapse : label}</Button>
   )
-  const x = <Button variant="ghost" size="icon" aria-label={ui.hide} title={ui.hide} onClick={hide} className="pointer-coarse:size-11"><X /></Button>
+  // the strip with the pressed button goes away: keep the focus in the page (the timer hides it without touching the focus)
+  const hideAndFocus = () => { hide(); document.getElementById('main')?.focus({ preventScroll: true }) }
+  const x = <Button variant="ghost" size="icon" aria-label={ui.hide} title={ui.hide} onClick={hideAndFocus} className="pointer-coarse:size-11"><X /></Button>
 
   return (
     <div onMouseEnter={() => setEngaged(true)} onMouseLeave={() => setEngaged(false)} onFocus={() => setEngaged(true)} onBlur={() => setEngaged(false)}
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border bg-card py-2 ps-4 pe-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border bg-card py-2 ps-4 pe-2">
       {kind === 'running' && <>
         <LoaderCircle aria-hidden className="size-4 shrink-0 text-muted-foreground motion-safe:animate-spin" />
-        <span role="status" className="text-sm font-medium tabular-nums whitespace-nowrap">
+        <span className="text-sm font-medium tabular-nums whitespace-nowrap">
           <span className="max-md:hidden">{known ? f(ui.sync_step, { n, m: total }) : ui.sync}</span>
           <span className="md:hidden">{known ? f(ui.sync_step_short, { n, m: total }) : ui.sync}</span>
         </span>
@@ -222,14 +232,15 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
       </>}
       {kind === 'error' && <>
         <CircleAlert aria-hidden className="size-4 shrink-0 text-destructive" />
-        <p role="alert" title={reason} className="min-w-0 flex-1 basis-48 text-sm max-md:line-clamp-2 md:flex">
+        <p role="alert" title={reason} className="min-w-0 flex-1 basis-48 text-sm md:flex">
           {known
             ? <>
-                <span className="font-medium md:me-1 md:whitespace-nowrap">{f(ui.sync_failed_at, { n, m: total })}</span>{' '}
-                <span className="text-muted-foreground md:min-w-0 md:truncate">{kept[0]}{reason}</span>
-                <span className="text-muted-foreground md:shrink-0 md:whitespace-nowrap">{kept[1]}</span>
+                <span className="font-medium max-md:block md:me-1 md:whitespace-nowrap">{f(ui.sync_failed_at, { n, m: total })}</span>{' '}
+                <span className="text-muted-foreground max-md:line-clamp-2 md:min-w-0 md:truncate">{kept[0]}{reason.replace(/\.$/, '')}.</span>
+                {/* phone: the reason may be cut to two lines, "kept" is a line of its own and never cut */}
+                <span className="text-muted-foreground max-md:block md:ms-1 md:shrink-0 md:whitespace-nowrap">{kept[1].replace(/^\.\s*/, '')}</span>
               </>
-            : <span className="font-medium">{f(ui.sync_failed, { e: reason })}</span>}
+            : <span className="font-medium max-md:line-clamp-2">{f(ui.sync_failed, { e: reason })}</span>}
         </p>
         <div className="ms-auto flex shrink-0 items-center gap-2">
           {toggle(ui.sync_log)}
@@ -239,14 +250,15 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
       </>}
       {kind === 'done' && <>
         <CircleCheck aria-hidden className="size-4 shrink-0 text-success" />
-        <span role="status" className="text-sm font-medium tabular-nums">{f(ui.sync_done, { n: fin ?? 0 })}</span>
+        <span className="text-sm font-medium tabular-nums">{f(ui.sync_done, { n: fin ?? 0 })}</span>
         <div className="ms-auto flex shrink-0 items-center gap-2">
-          {!!fin && <Button variant="ghost" onClick={() => { onShowNew(); hide() }} className="pointer-coarse:h-11">{ui.show_new}</Button>}
+          {!!fin && <Button variant="ghost" onClick={() => { onShowNew(); hideAndFocus() }} className="pointer-coarse:h-11">{ui.show_new}</Button>}
           {x}
         </div>
       </>}
       {more && kind !== 'done' && (
         <div className="grid basis-full gap-3 border-t py-3 pe-2">
+          {kind === 'error' && reason && <p className="text-sm break-words">{reason}</p>}
           {steps.length > 0 && <ol className="grid gap-1.5 text-sm">
             {steps.map((i) => {
               const state = i < n ? 'done' : i === n ? (kind === 'error' ? 'fail' : 'cur') : 'todo'
@@ -272,8 +284,9 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
 function AddLinks({ open, setOpen, running, start }: { open: boolean; setOpen: (o: boolean) => void; running: boolean; start: (urls: string[]) => void }) {
   const { ui } = useLang()
   const [links, setLinks] = useState('')
-  const words = links.split(/\s+/).filter(Boolean)
-  const urls = words.filter((l) => LINK.test(l))
+  const urls = links.split(/\s+/).filter((l) => LINK.test(l))
+  // the field says "one per line", so count lines, not words; a line with at least one link is fine
+  const skipped = links.split('\n').map((l) => l.trim()).filter((l) => l && !l.split(/\s+/).some((w) => LINK.test(w))).length
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant="outline" size="icon" title={ui.add_links} aria-label={ui.add_links} className="max-md:size-11 pointer-coarse:size-11" />}>
@@ -283,7 +296,7 @@ function AddLinks({ open, setOpen, running, start }: { open: boolean; setOpen: (
         <label htmlFor="links" className="text-sm font-medium">{ui.paste_links}</label>
         <Textarea id="links" rows={4} value={links} onChange={(e) => setLinks(e.target.value)} aria-describedby="links-hint" />
         <p id="links-hint" className="text-xs text-muted-foreground">
-          {words.length > urls.length ? f(ui.links_skipped, { n: words.length - urls.length }) : ui.links_hint}
+          {skipped > 0 ? f(ui.links_skipped, { n: skipped }) : running ? ui.links_busy : ui.links_hint}
         </p>
         <Button className="self-end" disabled={!urls.length || running} onClick={() => { start(urls); setLinks(''); setOpen(false) }}>
           {f(ui.add_sync, { n: urls.length })}
@@ -319,6 +332,20 @@ function TelegramSetup({ src, reload }: { src: Sources; reload: () => void }) {
   const [v, setV] = useState({ api_id: '', api_hash: '', phone: '', code: '', password: '', hash: '' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [confirm, setConfirm] = useState(false) // "Disconnect" asks first: the login cannot be restored without a new code
+  const logoutBtn = useRef<HTMLButtonElement>(null)
+  const cancelBtn = useRef<HTMLButtonElement>(null)
+  const back = useRef(false)
+  const form = useRef<HTMLFormElement>(null)
+  const loggedOut = useRef(false)
+  // after "Disconnect" the confirm row is gone: the focus goes to the first field of the sign-in form
+  useEffect(() => {
+    if (!src.telegram && loggedOut.current) { loggedOut.current = false; form.current?.querySelector('input')?.focus() }
+  }, [src.telegram])
+  useEffect(() => {
+    if (confirm) cancelBtn.current?.focus() // the safe choice gets the focus
+    else if (back.current) { back.current = false; logoutBtn.current?.focus() }
+  }, [confirm])
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value })
   const call = async (step: string, data: object) => {
     setBusy(true); setErr('')
@@ -326,6 +353,7 @@ function TelegramSetup({ src, reload }: { src: Sources; reload: () => void }) {
   }
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (busy) return // the button stays focusable while busy (aria-disabled), so Enter can still submit
     if (stage === 'creds') {
       const r = await call('code', { api_id: v.api_id, api_hash: v.api_hash, phone: v.phone })
       if (r) { setV({ ...v, hash: r.hash }); setStage('code') }
@@ -338,12 +366,17 @@ function TelegramSetup({ src, reload }: { src: Sources; reload: () => void }) {
   if (src.telegram) return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <CircleCheck className="size-4 text-success" aria-hidden /> {f(ui.tg_connected, { u: src.telegram })}
-      <Button size="sm" variant="ghost" disabled={busy} onClick={async () => { if (await call('logout', {})) reload() }}>{ui.tg_logout}</Button>
+      {confirm ? <>
+        <p className="w-full text-sm">{ui.tg_logout_confirm}</p>
+        <Button size="sm" variant="outline" disabled={busy} focusableWhenDisabled className="text-destructive hover:text-destructive pointer-coarse:h-11"
+          onClick={async () => { if (await call('logout', {})) { loggedOut.current = true; setConfirm(false); reload() } }}>{ui.tg_logout}</Button>
+        <Button ref={cancelBtn} size="sm" variant="ghost" className="pointer-coarse:h-11" onClick={() => { back.current = true; setConfirm(false) }}>{ui.cancel}</Button>
+      </> : <Button ref={logoutBtn} size="sm" variant="ghost" className="text-destructive hover:text-destructive pointer-coarse:h-11" onClick={() => setConfirm(true)}>{ui.tg_logout}</Button>}
       {err && <p role="alert" className="w-full text-sm text-destructive">{f(ui.ob_error, { e: err })}</p>}
     </div>
   )
   return (
-    <form onSubmit={submit} className="grid gap-3">
+    <form ref={form} onSubmit={submit} className="grid gap-3">
       {stage === 'creds' && <>
         <Steps items={[ui.tg_step1, ui.tg_step2, ui.tg_step3]} />
         <a href="https://my.telegram.org/apps" target="_blank" rel="noreferrer" className="w-fit text-sm underline">my.telegram.org<Ext /></a>
@@ -357,7 +390,7 @@ function TelegramSetup({ src, reload }: { src: Sources; reload: () => void }) {
       {stage === 'password' && <Field label={ui.tg_password} type="password" autoComplete="current-password" required autoFocus value={v.password} onChange={set('password')} />}
       {err && <p role="alert" className="text-sm text-destructive">{f(ui.ob_error, { e: err })}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={busy}>{stage === 'creds' ? ui.tg_get_code : ui.tg_sign_in}</Button>
+        <Button type="submit" disabled={busy} focusableWhenDisabled>{stage === 'creds' ? ui.tg_get_code : ui.tg_sign_in}</Button>
         {stage !== 'creds' && <Button type="button" variant="ghost" onClick={() => { setStage('creds'); setErr('') }}>{ui.tg_back}</Button>}
       </div>
       <p className="text-xs text-muted-foreground">{ui.tg_privacy}</p>
@@ -370,7 +403,7 @@ function TikTokSetup({ src, reload }: { src: Sources; reload: () => void }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const upload = async (file?: File) => {
-    if (!file) return
+    if (!file || busy) return
     setBusy(true); setErr('')
     try { await postJson('api/tiktok', file); reload() } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
@@ -383,8 +416,9 @@ function TikTokSetup({ src, reload }: { src: Sources; reload: () => void }) {
             <Steps items={[ui.tt_step1, ui.tt_step2, ui.tt_step3]} />
           </>}
       <label className={`w-fit ${busy ? 'pointer-events-none opacity-50' : ''}`}>
-        <input type="file" accept=".zip,.json,application/zip,application/json" className="peer sr-only" disabled={busy}
-          onChange={(e) => { upload(e.target.files?.[0]); e.target.value = '' }} />
+        {/* not `disabled`: a disabled input drops the focus; while busy it opens no file dialog and ignores the file */}
+        <input type="file" accept=".zip,.json,application/zip,application/json" className="peer sr-only" aria-disabled={busy || undefined}
+          onClick={(e) => { if (busy) e.preventDefault() }} onChange={(e) => { upload(e.target.files?.[0]); e.target.value = '' }} />
         <span className="inline-flex h-8 cursor-pointer items-center rounded-lg border px-3 text-sm font-medium hover:bg-secondary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring">
           {busy ? ui.tt_uploading : src.tiktok !== null ? ui.tt_replace : ui.tt_upload}
         </span>
@@ -402,6 +436,7 @@ function ObsidianSetup({ src }: { src: Sources }) {
   const [res, setRes] = useState('')
   const run = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (busy) return
     setBusy(true); setErr(''); setRes('')
     try {
       const r = await postJson('api/obsidian', { path })
@@ -412,8 +447,8 @@ function ObsidianSetup({ src }: { src: Sources }) {
     <form onSubmit={run} className="grid gap-3">
       <p className="text-sm text-muted-foreground">{ui.obs_desc}</p>
       <Field label={ui.obs_path} placeholder="~/Documents/Vault/shelf" autoComplete="off" spellCheck={false} required value={path} onChange={(e) => setPath(e.target.value)} />
-      <Button type="submit" variant="outline" disabled={busy} className="w-fit">{busy ? ui.obs_exporting : ui.obs_export}</Button>
-      <p role="status" className="flex items-center gap-2 text-sm empty:hidden">{res && <><CircleCheck className="size-4 text-success" aria-hidden />{res}</>}</p>
+      <Button type="submit" variant="outline" disabled={busy} focusableWhenDisabled className="w-fit">{busy ? ui.obs_exporting : ui.obs_export}</Button>
+      <p role="status" className="flex items-center gap-2 text-sm empty:sr-only">{res && <><CircleCheck className="size-4 text-success" aria-hidden />{res}</>}</p>
       {err && <p role="alert" className="text-sm text-destructive">{f(ui.ob_error, { e: err })}</p>}
     </form>
   )
@@ -423,6 +458,8 @@ function Onboarding({ open, setOpen }: { open: boolean; setOpen: (o: boolean) =>
   const { ui } = useLang()
   const [src, setSrc] = useState<Sources | null>(null)
   const [changed, setChanged] = useState(false)
+  const title = useRef<HTMLHeadingElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
   const reload = useCallback((auto = false) => fetch('api/sources').then((r) => r.json()).then((s: Sources) => {
     setSrc(s)
     // first visit: open by itself while something is neither connected nor put off with "Add later"
@@ -436,21 +473,22 @@ function Onboarding({ open, setOpen }: { open: boolean; setOpen: (o: boolean) =>
     <section aria-labelledby={'ob-' + id} className="grid gap-3 rounded-lg border p-3">
       <div className="flex items-center justify-between gap-2">
         <h3 id={'ob-' + id} className="font-medium">{title}</h3>
-        {!ok && !src?.later.includes(id) && <Button size="sm" variant="ghost" onClick={() => later(id)}>{ui.ob_later}</Button>}
+        {!ok && !src?.later.includes(id) && <Button size="sm" variant="ghost" onClick={() => later(id)} className="pointer-coarse:h-11">{ui.ob_later}</Button>}
       </div>
       {body}
     </section>
   )
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)} aria-label={pending && pending.length > 0 ? `${ui.ob_open}, ${ui.ob_pending}` : undefined} className="relative max-md:size-11 max-md:px-0 pointer-coarse:h-11">
+      <Button ref={trigger} variant="outline" onClick={() => setOpen(true)} aria-label={pending && pending.length > 0 ? `${ui.ob_open}, ${ui.ob_pending}` : undefined} className="relative max-md:size-11 max-md:px-0 pointer-coarse:h-11">
         <Plug aria-hidden /><span className="max-md:sr-only">{ui.ob_open}</span>
         {pending && pending.length > 0 && <span className="size-2 rounded-full bg-foreground max-md:absolute max-md:end-2 max-md:top-2" aria-hidden />}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent closeLabel={ui.close} className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+        {/* a window that opens by itself must not put the focus on "Add later": the title takes it; on close it goes to the trigger */}
+        <DialogContent closeLabel={ui.close} initialFocus={title} finalFocus={trigger} className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{ui.ob_title}</DialogTitle>
+            <DialogTitle ref={title} tabIndex={-1} className="outline-none">{ui.ob_title}</DialogTitle>
             <DialogDescription>{ui.ob_desc}</DialogDescription>
           </DialogHeader>
           {src && <>
@@ -459,7 +497,7 @@ function Onboarding({ open, setOpen }: { open: boolean; setOpen: (o: boolean) =>
             {section('obsidian', ui.obs_title, true, <ObsidianSetup src={src} />)}
           </>}
           <DialogFooter className="items-center gap-2">
-            {changed && <p role="status" className="me-auto text-sm text-muted-foreground">{ui.ob_sync_hint}</p>}
+            <p role="status" className="me-auto text-sm text-muted-foreground empty:sr-only">{changed ? ui.ob_sync_hint : ''}</p>
             <Button onClick={() => setOpen(false)}>{ui.ob_done}</Button>
           </DialogFooter>
         </DialogContent>
@@ -506,28 +544,28 @@ function ReelCard({ r, toggle, active, current, onOpen, setRef }: {
       className={cn(CARD, 'transition-[border-color] duration-[120ms] hover:border-input has-[.card-open:focus-visible]:outline-2 has-[.card-open:focus-visible]:outline-offset-2 has-[.card-open:focus-visible]:outline-ring',
         current && 'border-foreground shadow-[inset_0_0_0_1px_var(--foreground)] hover:border-foreground')}>
       <div aria-hidden className="relative aspect-[9/16] w-[104px] shrink-0 overflow-hidden rounded-sm bg-muted after:pointer-events-none after:absolute after:inset-0 after:rounded-sm after:shadow-[inset_0_0_0_1px_oklch(0_0_0/.1)] max-md:w-[72px] dark:after:shadow-[inset_0_0_0_1px_oklch(1_0_0/.1)]">
-        {thumb ? <img src={thumb} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" /> : <Film className="absolute inset-0 m-auto size-5 text-muted-foreground" />}
+        {thumb ? <Thumb src={thumb} icon={<Film className="absolute inset-0 m-auto size-5 text-muted-foreground" />} /> : <Film className="absolute inset-0 m-auto size-5 text-muted-foreground" />}
       </div>
       <div className="flex min-w-0 max-w-[68ch] flex-1 flex-col gap-2">
         <div className="flex min-w-0 flex-col gap-1">
           <h3 className="text-base leading-[1.4] font-semibold">
             <button type="button" ref={(el) => setRef(r.id, el)} onClick={(e) => onOpen(r.id, e.currentTarget)} aria-haspopup="dialog" aria-expanded={current}
               className="card-open line-clamp-2 text-start text-balance after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none">
-              {r.title || (r.summary ? cut(r.summary) : r.id)}
+              {r.title || (r.summary ? cut(r.summary) : ui.d_untitled)}
             </button>
           </h3>
           <div className="flex min-w-0 flex-nowrap items-center gap-x-1.5 gap-y-0.5 text-xs whitespace-nowrap text-muted-foreground max-[22rem]:flex-wrap">
             <span className="shrink-0 rounded-sm bg-secondary px-1.5 py-0.5 font-medium text-foreground">{SOURCES[r.source] ?? r.source}</span>
             <a href={r.url} target="_blank" rel="noreferrer" aria-label={f(ui.open_reel_by, { a: r.author })} title={ui.open_reel}
-              className="relative z-10 flex min-w-0 shrink items-center hover:underline">
+              className="relative z-10 flex min-w-0 shrink items-center hover:underline pointer-coarse:before:absolute pointer-coarse:before:-inset-y-2 pointer-coarse:before:inset-x-0 pointer-coarse:before:content-['']">
               <span className="truncate">@{r.author}</span><ArrowUpRight aria-hidden className="size-3 shrink-0" />
             </a>
             {date && <><span aria-hidden className="max-[22rem]:hidden">·</span><span className="shrink-0 tabular-nums">{date}</span></>}
           </div>
         </div>
-        {r.tags.length > 0 && (
+        {real(r.tags).length > 0 && (
           <div className="relative z-10 flex flex-wrap gap-1.5">
-            {r.tags.slice(0, 2).map((t) => <Tag key={t} t={t} on={active.has(t)} onClick={() => toggle(t)} />)}
+            {real(r.tags).slice(0, 2).map((t) => <Tag key={t} t={t} on={active.has(t)} onClick={() => toggle(t)} />)}
           </div>
         )}
         {r.summary && <p className="line-clamp-3 text-sm text-pretty">{r.summary}</p>}
@@ -572,7 +610,7 @@ function Facet({ on, label, n, onClick, sheet }: { on: boolean; label: string; n
   const { ui } = useLang()
   return (
     <button type="button" aria-pressed={on} aria-label={`${label}, ${f(ui.n_videos, { n })}`} onClick={onClick}
-      className={cn('flex w-full items-center gap-2 rounded-lg px-2 text-start text-sm transition-colors duration-[120ms] hover:bg-accent',
+      className={cn('flex w-full items-center gap-2 rounded-lg px-2 text-start text-sm transition-[background-color] duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] hover:bg-accent',
         sheet ? 'h-11' : 'h-8 pointer-coarse:h-11', on && 'bg-secondary font-medium')}>
       <span aria-hidden className="size-4 shrink-0">{on && <Check className="size-4" />}</span>
       <span aria-hidden className="min-w-0 flex-1 truncate">{label}</span>
@@ -665,10 +703,10 @@ function Notice({ icon: Icon, title, children, actions, role }: { icon: typeof I
   )
 }
 
-function NothingFound({ q, chips, reset }: { q: string; chips: Chip[]; reset: () => void }) {
+function NothingFound({ q, chips, reset, title }: { q: string; chips: Chip[]; reset: () => void; title?: string }) {
   const { ui } = useLang()
   return (
-    <Notice role="status" icon={SearchX} title={q ? f(ui.nothing_q, { q }) : ui.nothing}
+    <Notice role="status" icon={SearchX} title={title ?? (q ? f(ui.nothing_q, { q }) : ui.nothing)}
       actions={<>
         {chips.slice(0, 3).map((c) => <Button key={c.label} variant="outline" onClick={c.clear} className="pointer-coarse:h-11"><X aria-hidden />{f(ui.remove_filter, { f: c.label })}</Button>)}
         <Button variant="ghost" onClick={reset} className="pointer-coarse:h-11">{ui.reset_all}</Button>
@@ -695,13 +733,13 @@ function EmptyState({ openSources, openAdd }: { openSources: () => void; openAdd
 function ErrorBlock({ retry }: { retry: () => void }) {
   const { ui } = useLang()
   return (
-    <div role="alert" className="flex items-start gap-3 rounded-2xl border bg-card p-3 ps-4">
+    <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl border bg-card p-3 ps-4">
       <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-56">
         <p className="font-semibold">{ui.load_failed_title}</p>
         <p className="text-sm text-muted-foreground">{ui.load_failed_desc}</p>
       </div>
-      <Button variant="outline" onClick={retry} className="pointer-coarse:h-11">{ui.retry}</Button>
+      <Button variant="outline" onClick={retry} className="max-sm:ms-7 pointer-coarse:h-11">{ui.retry}</Button>
     </div>
   )
 }
@@ -832,6 +870,14 @@ function groupPlaces(reels: Reel[]) {
 const WIDE = '(min-width: 1024px)' // lg: the map popup exists only here; on a phone the row and the marker carry the selection
 const THUMB = 'relative block aspect-[9/16] overflow-hidden rounded-sm bg-muted'
 
+// Cover image: a file that fails to load must not show the browser's broken-image glyph. The `icon` (if any) takes its place on the
+// muted backdrop; `onBroken` lets the parent drop things that only make sense over a picture (the play button, a whole frame).
+function Thumb({ src, icon, onBroken }: { src: string; icon?: React.ReactNode; onBroken?: () => void }) {
+  const [bad, setBad] = useState<string | null>(null) // the src that failed: another src starts clean
+  if (bad === src) return <>{icon}</>
+  return <img src={src} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={() => { setBad(src); onBroken?.() }} />
+}
+
 // Popup is built with DOM nodes and textContent: place names come from an LLM and must not be parsed as HTML.
 function popupOf(p: PlaceRow, ui: Lang['ui'], onOpenReel: (id: string, el: HTMLElement) => void, onMore: (key: string) => void) {
   const el = document.createElement('div')
@@ -852,7 +898,7 @@ function popupOf(p: PlaceRow, ui: Lang['ui'], onOpenReel: (id: string, el: HTMLE
     b.type = 'button'; b.title = r.title || r.id; b.setAttribute('aria-label', f(ui.open_details_by, { a: r.author }))
     b.className = `${THUMB} w-7 ${OUTLINE}`
     const t = thumbOf(r)
-    if (t) { const i = document.createElement('img'); i.src = t; i.alt = ''; i.loading = 'lazy'; i.className = 'absolute inset-0 size-full object-cover'; b.append(i) }
+    if (t) { const i = document.createElement('img'); i.src = t; i.alt = ''; i.loading = 'lazy'; i.className = 'absolute inset-0 size-full object-cover'; i.onerror = () => { i.hidden = true }; b.append(i) }
     b.onclick = () => onOpenReel(r.id, b)
     thumbs.append(b)
   }
@@ -896,7 +942,9 @@ function PlacesMap({ rows, sel, onSelect, onOpenReel, onMore }: {
   const cb = useRef({ ui, rows, onSelect, onOpenReel, onMore })
   useEffect(() => { cb.current = { ui, rows, onSelect, onOpenReel, onMore } })
   useEffect(() => {
-    const m = L.map(el.current!).setView([20, 0], 2)
+    // Leaflet ships English labels: its zoom control is rebuilt with ours, the popup's close button is relabeled on open
+    const m = L.map(el.current!, { zoomControl: false }).setView([20, 0], 2)
+    L.control.zoom({ zoomInTitle: cb.current.ui.map_zoom_in, zoomOutTitle: cb.current.ui.map_zoom_out }).addTo(m)
     L.tileLayer(TILES, {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(m)
@@ -907,6 +955,7 @@ function PlacesMap({ rows, sel, onSelect, onOpenReel, onMore }: {
     // reduced motion: Leaflet's autoPan animates, so keep the popup in view with an instant pan instead
     m.on('popupopen', (e) => {
       const p = e.popup.getElement()
+      p?.querySelector('.leaflet-popup-close-button')?.setAttribute('aria-label', cb.current.ui.close)
       if (reducedMotion() && p) m.panInside(e.popup.getLatLng()!, { animate: false, paddingTopLeft: [p.offsetWidth / 2 + 16, p.offsetHeight + 44], paddingBottomRight: [p.offsetWidth / 2 + 16, 16] })
     })
     return () => { m.remove(); map.current = null }
@@ -1011,7 +1060,7 @@ function PlaceRowItem({ p, selected, all, onSelect, onMore, onOpenReel, setRef }
   return (
     <div ref={setRef} data-selected={selected || undefined}
       className={cn('grid scroll-mt-[268px] grid-cols-[minmax(0,1fr)_auto] gap-x-1 gap-y-2 rounded-lg p-2 transition-[background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)] lg:scroll-mt-12',
-        geo && 'hover:bg-muted', 'data-[selected]:bg-muted data-[selected]:shadow-[inset_0_0_0_1px_var(--input)]')}>
+        geo && 'hover:bg-muted', 'data-[selected]:bg-muted data-[selected]:shadow-[inset_0_0_0_1px_var(--foreground)]')}>
       {geo
         ? <button type="button" aria-pressed={selected} onClick={onSelect} className={main}>{body}</button>
         : <div className={main}>{body}</div>}
@@ -1025,7 +1074,7 @@ function PlaceRowItem({ p, selected, all, onSelect, onMore, onOpenReel, setRef }
           return (
             <button key={r.id} type="button" aria-haspopup="dialog" onClick={(e) => onOpenReel(r.id, e.currentTarget)} title={r.title || r.id} aria-label={f(ui.open_details_by, { a: r.author })}
               className={cn(THUMB, 'w-6 pointer-coarse:w-9', OUTLINE)}>
-              {th && <img src={th} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />}
+              {th && <Thumb src={th} />}
             </button>
           )
         })}
@@ -1040,8 +1089,8 @@ function PlaceRowItem({ p, selected, all, onSelect, onMore, onOpenReel, setRef }
   )
 }
 
-function PlacesView({ reels, total, sel, setSel, onOpenReel }: {
-  reels: Reel[]; total: number; sel: Sel | null; setSel: (s: Sel | null) => void; onOpenReel: (id: string, el: HTMLElement) => void
+function PlacesView({ reels, total, chips, reset, sel, setSel, onOpenReel }: {
+  reels: Reel[]; total: number; chips: Chip[]; reset: () => void; sel: Sel | null; setSel: (s: Sel | null) => void; onOpenReel: (id: string, el: HTMLElement) => void
 }) {
   const { ui, language } = useLang()
   const uid = useId()
@@ -1054,9 +1103,11 @@ function PlacesView({ reels, total, sel, setSel, onOpenReel }: {
   useEffect(() => { if (sel && !rows.some((r) => r.key === sel.key)) setSel(null) }, [rows, sel, setSel]) // a filter removed it
   useEffect(() => { if (sel) toRow(sel.key) }, [sel, toRow])
   const showMore = useCallback((key: string) => { setMore((s) => new Set(s).add(key)); toRow(key) }, [toRow])
-  if (!groups.length) return <p className="text-sm text-muted-foreground">{total ? ui.places_nothing : ui.places_empty}</p>
+  if (!groups.length) return total
+    ? <NothingFound q="" title={ui.places_nothing} chips={chips} reset={reset} />
+    : <Notice icon={MapPinOff} title={ui.places_empty}><p className="max-w-[44ch] text-sm text-pretty text-muted-foreground">{ui.places_empty_desc}</p></Notice>
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 [grid-template-areas:'map'_'list'] lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:[grid-template-areas:'list_map'] xl:grid-cols-[380px_minmax(0,1fr)]">
+    <div className="grid animate-in grid-cols-[minmax(0,1fr)] gap-4 duration-300 ease-[cubic-bezier(0.2,0,0,1)] fade-in-0 [grid-template-areas:'map'_'list'] lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:[grid-template-areas:'list_map'] xl:grid-cols-[380px_minmax(0,1fr)]">
       <div className="flex flex-col gap-6 [grid-area:list]">
         {groups.map(({ city, list }, i) => {
           const hid = `${uid}-${i}`
@@ -1233,6 +1284,17 @@ function TextItem({ title, text, re, q, ocr }: { title: string; text: string; re
   )
 }
 
+// A frame that fails to load is dropped whole (a link to a missing file is no use)
+function Frame({ src, label }: { src: string; label: string }) {
+  const [gone, setGone] = useState(false)
+  return (
+    <a hidden={gone} href={src} target="_blank" rel="noreferrer" aria-label={label}
+      className={cn('relative block aspect-[9/16] w-22 shrink-0 snap-start overflow-hidden rounded-sm bg-muted sm:w-[104px]', OUTLINE)}>
+      <Thumb src={src} onBroken={() => setGone(true)} />
+    </a>
+  )
+}
+
 function PanelBody({ r, q, active, onTag, onPlace, titleRef }: {
   r: Reel; q: string; active: Set<string>; onTag: (t: string) => void; onPlace: (key: string) => void; titleRef: React.RefObject<HTMLHeadingElement | null>
 }) {
@@ -1240,7 +1302,7 @@ function PanelBody({ r, q, active, onTag, onPlace, titleRef }: {
   const re = useMemo(() => matchRe(q), [q])
   const th = thumbOf(r)
   const title = r.title || (r.summary ? cut(r.summary) : ui.d_untitled)
-  const tags = [...new Set([...r.tags, ...r.specific_tags])]
+  const tags = [...new Set(real([...r.tags, ...r.specific_tags]))]
   const date = fmtDate(r.upload_date)
   // chip + date · duration · likes stay in one nowrap group, the (long) author link gets its own line: no dot hangs at a line end
   const meta = [
@@ -1267,13 +1329,15 @@ function PanelBody({ r, q, active, onTag, onPlace, titleRef }: {
   })
   const frames = r.thumbs ?? []
   const texts = ([[ui.d_transcript, r.transcript, false], [ui.d_ocr, r.ocr ?? '', true], [ui.d_caption, r.caption, false]] as const).filter(([, t]) => t.trim())
+  const bare = !r.summary && !kinds.some(Boolean) && !extra.some(Boolean) && frames.length <= 1 && texts.length === 0
+  const [broken, setBroken] = useState(false) // the cover failed to load: no play button over an empty backdrop
   return (
     <div className="grid gap-8 p-4 sm:p-6">
       <div className="grid grid-cols-[80px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[96px_minmax(0,1fr)]">
         <a href={r.url} target="_blank" rel="noreferrer" aria-label={f(ui.open_reel_by, { a: r.author })}
           className={cn('relative block aspect-[9/16] overflow-hidden rounded-lg bg-muted', OUTLINE)}>
-          {th ? <img src={th} alt="" className="absolute inset-0 size-full object-cover" /> : <Film aria-hidden className="absolute inset-0 m-auto size-6 text-muted-foreground" />}
-          {th && <span aria-hidden className="absolute inset-0 m-auto grid size-9 place-items-center rounded-full bg-on-media text-on-media-fg"><Play className="ms-0.5 size-4 fill-current" /></span>}
+          {th ? <Thumb src={th} onBroken={() => setBroken(true)} icon={<Film aria-hidden className="absolute inset-0 m-auto size-6 text-muted-foreground" />} /> : <Film aria-hidden className="absolute inset-0 m-auto size-6 text-muted-foreground" />}
+          {th && !broken && <span aria-hidden className="absolute inset-0 m-auto grid size-9 place-items-center rounded-full bg-on-media text-on-media-fg"><Play className="ms-0.5 size-4 fill-current" /></span>}
         </a>
         <div className="grid min-w-0 gap-3">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -1281,24 +1345,20 @@ function PanelBody({ r, q, active, onTag, onPlace, titleRef }: {
             <span className="flex items-center gap-x-2 whitespace-nowrap">
               {meta.map((node, i) => <Fragment key={i}>{i > 0 && <span aria-hidden>·</span>}{node}</Fragment>)}
             </span>
-            <span className="basis-full font-medium break-words text-foreground">@{r.author}</span>
+            <span className="basis-full min-w-0 font-medium wrap-anywhere text-foreground">@{r.author}</span>
           </div>
           <h2 id="reel-title" ref={titleRef} tabIndex={-1} className="text-2xl leading-[1.2] font-semibold tracking-[-0.01em] break-words text-balance outline-none">{title}</h2>
           {tags.length > 0 && <div className="flex flex-wrap gap-1.5">{tags.map((t) => <Tag key={t} t={t} on={active.has(t)} onClick={() => onTag(t)} />)}</div>}
         </div>
       </div>
+      {bare && <p className="max-w-[68ch] text-sm text-pretty text-muted-foreground">{ui.d_no_text}</p>}
       {r.summary && <p className="max-w-[68ch] text-base text-pretty">{r.summary}</p>}
       {kinds}
       {extra}
       {frames.length > 1 && (
         <Block title={ui.d_frames} extra={<span className="ms-2 text-base font-normal tabular-nums text-muted-foreground">{frames.length}</span>}>
           <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:px-6">
-            {frames.map((src, i) => (
-              <a key={src} href={src} target="_blank" rel="noreferrer" aria-label={f(ui.d_frame, { n: i + 1, m: frames.length })}
-                className={cn('relative block aspect-[9/16] w-22 shrink-0 snap-start overflow-hidden rounded-sm bg-muted sm:w-[104px]', OUTLINE)}>
-                <img src={src} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />
-              </a>
-            ))}
+            {frames.map((src, i) => <Frame key={src} src={src} label={f(ui.d_frame, { n: i + 1, m: frames.length })} />)}
           </div>
         </Block>
       )}
@@ -1363,11 +1423,14 @@ const hashId = () => {
   try { return m ? decodeURIComponent(m[1]) : null } catch { return null } // a broken %-sequence in the link: no panel
 }
 
+const EASE = [0.2, 0, 0, 1] as const // DESIGN.md: ease-out
+
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform)
 
 function Main() {
   const { ui, language } = useLang()
-  const { reels, load, state } = useReels()
+  const reduce = useReducedMotion()
+  const { reels, load, retry, state } = useReels()
   const [theme, setTheme] = useTheme()
   const [mode, setMode] = useState<'reels' | 'places'>('reels')
   const [q, setQ] = useState('')
@@ -1399,9 +1462,9 @@ function Main() {
     const tags = new Map<string, number>(), cols = new Map<string, number>(), srcs = new Map<string, number>()
     let none = 0
     for (const r of reels) {
-      new Set(r.tags).forEach((t) => tags.set(t, (tags.get(t) ?? 0) + 1))
-      new Set(r.collections).forEach((c) => cols.set(c, (cols.get(c) ?? 0) + 1))
-      if (!r.collections.length) none++
+      new Set(real(r.tags)).forEach((t) => tags.set(t, (tags.get(t) ?? 0) + 1))
+      new Set(real(r.collections)).forEach((c) => cols.set(c, (cols.get(c) ?? 0) + 1))
+      if (!real(r.collections).length) none++
       srcs.set(r.source, (srcs.get(r.source) ?? 0) + 1)
     }
     return {
@@ -1417,7 +1480,7 @@ function Main() {
     const hit = (r: Reel) => [r.title, r.author, r.caption, r.transcript, r.ocr].join(' ').toLowerCase().includes(ql)
     const list = reels
       .filter((r) => src === 'all' || r.source === src)
-      .filter((r) => col === 'all' || (col === 'none' ? !r.collections.length : r.collections.includes(col)))
+      .filter((r) => col === 'all' || (col === 'none' ? !real(r.collections).length : r.collections.includes(col)))
       .filter((r) => { const s = new Set([...r.tags, ...r.specific_tags]); return [...active].every((t) => s.has(t)) })
       .filter((r) => !ql || (sem ? sem.has(r.id) : hit(r)))
     return ql && sem ? list.sort((a, b) => (sem.get(b.id) ?? 0) - (sem.get(a.id) ?? 0)) : list.sort(SORTS[sort])
@@ -1525,16 +1588,30 @@ function Main() {
   const hasReels = reels.length > 0
   const loading = state === 'loading'
   const controls = hasReels || loading
+  // no collections, no second source, no tag common enough: the sidebar (and the phone filter button) would be an empty box
+  const hasFacets = d.cols.length > 0 || d.srcs.length > 1 || d.tags.some(([t, n]) => n >= MIN_TAG || active.has(t))
   const strip = sync.kind !== null
+  // reduced motion: the strip leaves with a fade while its height stays, so the header margin changes only when it is really gone (no 8px step down first)
+  const [present, setPresent] = useState(false)
+  if (strip && !present) setPresent(true) // derived during render, not in an effect
+  const tight = reduce ? strip || present : strip
   const placesTotal = useMemo(() => reels.reduce((n, r) => n + (r.places?.length ?? 0), 0), [reels])
   const placesShown = useMemo(() => (mode === 'places' ? groupPlaces(shown).reduce((n, g) => n + g.list.length, 0) : 0), [mode, shown])
-  const countText = !(hasReels || state === 'ok') ? '' : mode === 'places' ? plural(ui.places_n, placesShown, language) : filtered || live.q ? f(ui.shown_of, { n: shown.length, m: reels.length }) : String(reels.length)
+  const countText = !hasReels ? '' : mode === 'places' ? (placesShown ? plural(ui.places_n, placesShown, language) : '') : filtered || live.q ? f(ui.shown_of, { n: shown.length, m: reels.length }) : String(reels.length)
   const facets = { d, col, setCol, src, setSrc, active, toggle }
+  // One permanent live region for loading and sync progress: it is always in the DOM, only its text changes (once per step, not every second).
+  const sn = sync.st?.n ?? 0, stotal = sync.st?.total || sync.st?.steps?.length || 0
+  const liveText = loading ? ui.loading
+    : sync.kind === 'running' ? (sn > 0 && stotal > 0 ? `${f(ui.sync_step, { n: sn, m: stotal })}: ${sync.st?.step ?? ''}` : ui.sync)
+    : sync.kind === 'done' ? f(ui.sync_done, { n: sync.fin ?? 0 })
+    : ''
+  const onRetry = () => { retry(); document.getElementById('main')?.focus({ preventScroll: true }) } // the block unmounts: keep the focus in the page
 
   return (
     <div className="mx-auto max-w-[86rem] px-4 py-3 md:px-6 md:py-6 min-[1200px]:px-8">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-card focus:px-3 focus:py-2">{ui.skip}</a>
-      <header className={cn('flex flex-wrap items-center gap-x-4 gap-y-2', strip ? 'mb-3 md:mb-4' : 'mb-3 md:mb-6')}>
+      <div role="status" className="sr-only">{liveText}</div>
+      <header className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 transition-[margin-bottom] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none', tight ? 'mb-3 duration-200 md:mb-4' : 'mb-3 duration-150 md:mb-6')}>
         <div className="flex items-baseline">
           <h1 className="text-xl font-semibold">{ui.title}</h1>
           <span role="status" className="ms-1.5 text-sm font-normal tabular-nums text-muted-foreground">{countText}</span>
@@ -1544,16 +1621,27 @@ function Main() {
           <ThemeSelect theme={theme} setTheme={setTheme} />
           <Onboarding open={sourcesOpen} setOpen={setSourcesOpen} />
           <AddLinks open={addOpen} setOpen={setAddOpen} running={sync.running} start={sync.start} />
-          <Button disabled={sync.running} onClick={() => sync.start([])} className="max-md:size-11 max-md:px-0 pointer-coarse:h-11">
+          <Button disabled={sync.running} focusableWhenDisabled onClick={() => sync.start([])} className="max-md:size-11 max-md:px-0 pointer-coarse:h-11">
             <RefreshCw aria-hidden className={sync.running ? 'motion-safe:animate-spin' : ''} /><span className="max-md:sr-only">{ui.sync}</span>
           </Button>
         </div>
       </header>
 
-      {strip && <div className="mb-3 md:mb-4"><SyncStrip sync={sync} onShowNew={showNew} /></div>}
+      {/* the strip folds in and out by height and opacity, so the list does not jump; with reduced motion only opacity changes */}
+      <LazyMotion features={domAnimation}><AnimatePresence initial={false} onExitComplete={() => setPresent(false)}>
+        {strip && (
+          <m.div key="strip" style={{ overflow: 'hidden' }}
+            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            animate={reduce ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0.15, ease: EASE } } : { height: 0, opacity: 0, transition: { duration: 0.15, ease: EASE } }}
+            transition={{ duration: 0.2, ease: EASE }}>
+            <div className="pb-3 md:pb-4"><SyncStrip sync={sync} onShowNew={showNew} /></div>
+          </m.div>
+        )}
+      </AnimatePresence></LazyMotion>
 
       <div className="flex items-start gap-6">
-        {controls && (
+        {controls && (!hasReels || hasFacets) && (
           <aside aria-label={ui.filters} className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-62 shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain rounded-2xl border bg-card p-2 md:flex">
             {hasReels ? <>
               {filtered && (
@@ -1577,7 +1665,7 @@ function Main() {
               <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-card ps-3 pe-1.5 pointer-coarse:h-11 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring">
                 <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                 <Input aria-label={ui.search} className="h-full min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:outline-none" placeholder={ui.search_ph} value={q} onChange={(e) => setQ(e.target.value)} />
-                <span role="status" className="flex items-center gap-1.5 pe-1.5 text-xs whitespace-nowrap text-muted-foreground empty:hidden">
+                <span role="status" className="flex items-center gap-1.5 pe-1.5 text-xs whitespace-nowrap text-muted-foreground empty:sr-only">
                   {searching && <><LoaderCircle aria-hidden className="size-3.5 motion-safe:animate-spin" />{ui.searching}</>}
                 </span>
                 {!searching && <kbd aria-hidden className="inline-flex h-[22px] items-center rounded-sm border px-1.5 font-sans text-xs text-muted-foreground max-md:hidden pointer-coarse:hidden">{isMac() ? '⌘K' : 'Ctrl K'}</kbd>}
@@ -1585,15 +1673,15 @@ function Main() {
               {mode === 'reels' && hasReels && <div className="max-md:hidden"><SortSelect sort={sort} setSort={setSort} relevance={relevance} /></div>}
             </div>
           )}
-          {semError && <p role="status" className="-mt-2 text-xs text-muted-foreground">{ui.sem_failed}</p>}
+          <p role="status" className="-mt-2 text-xs text-muted-foreground empty:sr-only">{semError ? ui.sem_failed : ''}</p>
 
           <div className="flex flex-wrap items-center gap-2 md:hidden">
             <ModeSwitch mode={mode} setMode={setMode} />
             {hasReels && (
               <div className="ms-auto flex items-center gap-2">
-                <Button variant="outline" className="h-11" onClick={() => setSheetOpen(true)} aria-label={nFilters ? f(ui.filters_label, { n: nFilters }) : undefined}>
+                {hasFacets && <Button variant="outline" className="h-11" onClick={() => setSheetOpen(true)} aria-label={nFilters ? f(ui.filters_label, { n: nFilters }) : undefined}>
                   <SlidersHorizontal aria-hidden />{nFilters ? f(ui.filters_n, { n: nFilters }) : ui.filters}
-                </Button>
+                </Button>}
                 {mode === 'reels' && <SortSelect icon sort={sort} setSort={setSort} relevance={relevance} />}
               </div>
             )}
@@ -1605,17 +1693,17 @@ function Main() {
             </div>
           )}
 
-          {state === 'error' && <ErrorBlock retry={load} />}
-          {loading && (
-            <div role="status" aria-label={ui.loading} className="grid grid-cols-1 items-start gap-3 min-[1200px]:grid-cols-2">
+          {state === 'error' && <ErrorBlock retry={onRetry} />}
+          {loading && !hasReels && (
+            <div aria-hidden className="grid grid-cols-1 items-start gap-3 min-[1200px]:grid-cols-2">
               {Array.from({ length: 4 }, (_, i) => <CardSkeleton key={i} />)}
             </div>
           )}
           {state === 'ok' && !hasReels && <EmptyState openSources={() => setSourcesOpen(true)} openAdd={() => setAddOpen(true)} />}
           {hasReels && !searching && shown.length === 0 && <NothingFound q={live.q} chips={chips} reset={resetAll} />}
           {hasReels && shown.length > 0 && (mode === 'places'
-            ? <PlacesView reels={shown} total={placesTotal} sel={mapSel} setSel={setMapSel} onOpenReel={openReel} />
-            : <div className="grid grid-cols-1 items-start gap-3 min-[1200px]:grid-cols-2">
+            ? <PlacesView reels={shown} total={placesTotal} chips={chips} reset={resetAll} sel={mapSel} setSel={setMapSel} onOpenReel={openReel} />
+            : <div className="grid animate-in grid-cols-1 items-start gap-3 duration-300 ease-[cubic-bezier(0.2,0,0,1)] fade-in-0 min-[1200px]:grid-cols-2">
                 {shown.map((r) => <ReelCard key={r.id} r={r} toggle={toggle} active={active} current={r.id === openId} onOpen={openReel} setRef={setRef} />)}
               </div>)}
         </main>
@@ -1644,8 +1732,8 @@ function Main() {
 }
 
 const FAIL = navigator.language.startsWith('ru')
-  ? { text: 'Не удалось связаться с сервером. Проверьте, запущен ли server.py.', retry: 'Повторить' }
-  : { text: 'Could not reach the server. Check that server.py is running.', retry: 'Retry' }
+  ? { text: 'Не удалось связаться с сервером. Проверьте, запущен ли server.py.', retry: 'Повторить', loading: 'Загружаю…' }
+  : { text: 'Could not reach the server. Check that server.py is running.', retry: 'Retry', loading: 'Loading…' }
 
 export default function App() {
   const [lang, setLang] = useState<Lang | null>(null)
@@ -1671,8 +1759,9 @@ export default function App() {
   )
   // language is loading: header skeleton instead of a white page
   return (
-    <div aria-hidden className="mx-auto max-w-[86rem] px-4 py-3 md:px-6 md:py-6 min-[1200px]:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="mx-auto max-w-[86rem] px-4 py-3 md:px-6 md:py-6 min-[1200px]:px-8">
+      <p role="status" className="sr-only">{FAIL.loading}</p>
+      <div aria-hidden className="flex flex-wrap items-center justify-between gap-2">
         <div className="h-7 w-24 rounded-sm bg-muted" />
         <div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-muted" /><div className="h-8 w-28 rounded-lg bg-muted" /><div className="h-8 w-8 rounded-lg bg-muted" /><div className="h-8 w-20 rounded-lg bg-muted" /></div>
       </div>
