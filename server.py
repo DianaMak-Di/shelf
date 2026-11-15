@@ -61,6 +61,8 @@ class H(BaseHTTPRequestHandler):
     def send(self, body, ctype="application/json", code=200):
         body = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code); self.send_header("Content-Type", ctype)
+        if ctype.startswith(("text/html", "application/json")):  # after a rebuild a cached index.html points at deleted assets
+            self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def allowed(self, post=False):

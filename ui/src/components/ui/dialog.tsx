@@ -84,11 +84,11 @@ function DialogContent({
 function DialogPanel({ className, children, ...props }: DialogPrimitive.Popup.Props) {
   return (
     <DialogPortal>
-      <DialogOverlay className="max-sm:hidden" />
+      <DialogOverlay className="phone:hidden" />
       <DialogPrimitive.Popup
         data-slot="dialog-panel"
         className={cn(
-          "fixed inset-y-0 end-0 z-50 h-dvh w-full overflow-y-auto overscroll-contain bg-card text-card-foreground outline-none sm:w-[600px] sm:border-s sm:shadow-dialog ease-[cubic-bezier(0.2,0,0,1)] data-open:duration-200 data-closed:duration-150 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:slide-in-from-end data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:slide-out-to-end",
+          "fixed inset-y-0 end-0 z-50 h-dvh w-full overflow-y-auto overscroll-contain bg-card text-card-foreground outline-none wide:w-[600px] wide:border-s wide:shadow-dialog ease-[cubic-bezier(0.2,0,0,1)] data-open:duration-200 data-closed:duration-150 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:slide-in-from-end data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:slide-out-to-end",
           className
         )}
         {...props}

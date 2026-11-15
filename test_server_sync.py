@@ -60,7 +60,7 @@ def serving(cls):
 
 # default (no --lan): as before
 httpd = serving(server.H)
-assert ask("GET", "/api/sync").status == 200
+assert ask("GET", "/api/sync").getheader("Cache-Control") == "no-cache"
 assert ask("GET", "/api/sync", host=f"localhost:{PORT}").status == 200
 assert ask("GET", "/api/sync", host="evil.com").status == 403
 assert ask("GET", "/api/sync", host=f"192.168.1.50:{PORT}").status == 403  # LAN host is not allowed without the flag

@@ -56,24 +56,45 @@ const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
 // Layout switches that CSS alone cannot make (one header instead of two, a dialog instead of a popover) follow the same
-// breakpoints as the classes: <768 phone layout (max-md), <640 full-screen windows (max-sm).
+// conditions as the `mob` and `phone` variants in index.css: <768 (or a phone held sideways) is the phone layout, <640 (same) full-screen windows.
 function useMedia(q: string) {
   const subscribe = useCallback((cb: () => void) => { const m = matchMedia(q); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb) }, [q])
   return useSyncExternalStore(subscribe, () => matchMedia(q).matches)
 }
-const useMobile = () => useMedia('(max-width: 767px)')
-const usePhone = () => useMedia('(max-width: 639px)')
+// a phone held sideways: judged by the device screen (short side <= 500px), not the window, so an Android tablet whose keyboard shrinks the window never flips
+const SIDEWAYS = '(pointer: coarse) and ((max-device-width: 500px) or (max-device-height: 500px))'
+const useMobile = () => useMedia(`(width < 768px), ${SIDEWAYS}`)
+const usePhone = () => useMedia(`(width < 640px), ${SIDEWAYS}`)
 
 // <640: a window takes the whole screen (header with the close button, own scroll, footer); the classes override the centered DialogContent.
-const FULL = 'max-sm:inset-0 max-sm:top-0 max-sm:left-0 max-sm:flex max-sm:h-dvh max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:flex-col max-sm:gap-0 max-sm:overflow-hidden max-sm:rounded-none max-sm:border-0 max-sm:p-0 motion-safe:max-sm:data-open:zoom-in-100 motion-safe:max-sm:data-open:slide-in-from-bottom motion-safe:max-sm:data-closed:zoom-out-100 motion-safe:max-sm:data-closed:slide-out-to-bottom'
+const FULL = 'phone:inset-0 phone:top-[var(--vvt,0px)] phone:left-0 phone:flex phone:h-[var(--vvh,100dvh)] phone:max-h-none phone:max-w-none phone:translate-x-0 phone:translate-y-0 phone:flex-col phone:gap-0 phone:overflow-hidden phone:rounded-none phone:border-0 phone:p-0 motion-safe:phone:data-open:zoom-in-100 motion-safe:phone:data-open:slide-in-from-bottom motion-safe:phone:data-closed:zoom-out-100 motion-safe:phone:data-closed:slide-out-to-bottom'
 const FULL_BODY = 'min-h-0 flex-1 overflow-y-auto overscroll-contain pt-4 pb-4 pl-(--gl) pr-(--gr)'
+
+// While a full-screen window is open on the phone: --vvh / --vvt follow the visual viewport (the part of the page above the keyboard).
+let fitting = 0 // windows that follow the visible area right now (Add and Sources are never open together, but one closing must not clear the other's variables)
+function useViewportFit(on: boolean) {
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!on || !vv) return
+    const root = document.documentElement
+    const set = () => { root.style.setProperty('--vvh', vv.height + 'px'); root.style.setProperty('--vvt', vv.offsetTop + 'px') }
+    fitting++
+    set()
+    vv.addEventListener('resize', set); vv.addEventListener('scroll', set)
+    return () => {
+      vv.removeEventListener('resize', set); vv.removeEventListener('scroll', set)
+      if (--fitting === 0) { root.style.removeProperty('--vvh'); root.style.removeProperty('--vvt') }
+    }
+  }, [on])
+}
 
 function FullBar({ children }: { children: React.ReactNode }) {
   const { ui } = useLang()
   return (
-    <div className="flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center justify-between gap-2 border-b bg-popover pt-[env(safe-area-inset-top)] pr-[max(0.25rem,env(safe-area-inset-right))] pl-(--gl)">
+    // "←" on the left, like in the details: a cross on the right sat exactly where the sync button is after the window closes
+    <div className="flex h-[calc(3.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b bg-popover pt-[env(safe-area-inset-top)] pr-(--gr) pl-[max(0.25rem,env(safe-area-inset-left))]">
+      <DialogClose render={<Button variant="ghost" size="icon" aria-label={ui.close} title={ui.close} className="size-11" />}><ArrowLeft aria-hidden /></DialogClose>
       {children}
-      <DialogClose render={<Button variant="ghost" size="icon" aria-label={ui.close} title={ui.close} className="size-11" />}><X aria-hidden /></DialogClose>
     </div>
   )
 }
@@ -127,7 +148,7 @@ function ThemeSelect({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) =
   return (
     <Select value={theme} onValueChange={(v) => v && setTheme(v as Theme)}>
       <SelectTrigger aria-label={label} title={label}
-        className="size-8 justify-center border-border bg-card p-0 hover:bg-muted data-popup-open:bg-muted max-md:size-11 pointer-coarse:size-11 data-[size=default]:max-md:h-11 [&>svg:last-child]:hidden">
+        className="size-8 justify-center border-border bg-card p-0 hover:bg-muted data-popup-open:bg-muted mob:size-11 pointer-coarse:size-11 data-[size=default]:mob:h-11 [&>svg:last-child]:hidden">
         <Icon aria-hidden />
       </SelectTrigger>
       <SelectContent align="end" alignItemWithTrigger={false} className="w-auto">
@@ -253,13 +274,13 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
       {kind === 'running' && <>
         <LoaderCircle aria-hidden className="size-4 shrink-0 text-muted-foreground motion-safe:animate-spin" />
         <span className="text-sm font-medium tabular-nums whitespace-nowrap">
-          <span className="max-md:hidden">{known ? f(ui.sync_step, { n, m: total }) : ui.sync}</span>
-          <span className="md:hidden">{known ? f(ui.sync_step_short, { n, m: total }) : ui.sync}</span>
+          <span className="mob:hidden">{known ? f(ui.sync_step, { n, m: total }) : ui.sync}</span>
+          <span className="desk:hidden">{known ? f(ui.sync_step_short, { n, m: total }) : ui.sync}</span>
         </span>
-        <span className="min-w-0 truncate text-sm text-muted-foreground max-md:hidden">{st.step}</span>
-        {elapsed && <span className="text-sm whitespace-nowrap tabular-nums text-muted-foreground max-md:hidden">{f(ui.sync_elapsed, { t: elapsed })}</span>}
+        <span className="min-w-0 truncate text-sm text-muted-foreground mob:hidden">{st.step}</span>
+        {elapsed && <span className="text-sm whitespace-nowrap tabular-nums text-muted-foreground mob:hidden">{f(ui.sync_elapsed, { t: elapsed })}</span>}
         <div className="ms-auto flex shrink-0 items-center gap-3">
-          {known && <div aria-hidden className="grid w-40 gap-[3px] max-md:hidden" style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}>
+          {known && <div aria-hidden className="grid w-40 gap-[3px] mob:hidden" style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}>
             {Array.from({ length: total }, (_, i) => <span key={i} className={cn('h-1 rounded-full', i < n - 1 ? 'bg-foreground' : 'bg-secondary')} />)}
           </div>}
           {toggle(ui.sync_more)}
@@ -267,15 +288,15 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
       </>}
       {kind === 'error' && <>
         <CircleAlert aria-hidden className="size-4 shrink-0 text-destructive" />
-        <p role="alert" title={reason} className="min-w-0 flex-1 basis-48 text-sm md:flex">
+        <p role="alert" title={reason} className="min-w-0 flex-1 basis-48 text-sm desk:flex">
           {known
             ? <>
-                <span className="font-medium max-md:block md:me-1 md:whitespace-nowrap">{f(ui.sync_failed_at, { n, m: total })}</span>{' '}
-                <span className="text-muted-foreground max-md:line-clamp-2 md:min-w-0 md:truncate">{kept[0]}{reason.replace(/\.$/, '')}.</span>
+                <span className="font-medium mob:block desk:me-1 desk:whitespace-nowrap">{f(ui.sync_failed_at, { n, m: total })}</span>{' '}
+                <span className="text-muted-foreground mob:line-clamp-2 desk:min-w-0 desk:truncate">{kept[0]}{reason.replace(/\.$/, '')}.</span>
                 {/* phone: the reason may be cut to two lines, "kept" is a line of its own and never cut */}
-                <span className="text-muted-foreground max-md:block md:ms-1 md:shrink-0 md:whitespace-nowrap">{kept[1].replace(/^\.\s*/, '')}</span>
+                <span className="text-muted-foreground mob:block desk:ms-1 desk:shrink-0 desk:whitespace-nowrap">{kept[1].replace(/^\.\s*/, '')}</span>
               </>
-            : <span className="font-medium max-md:line-clamp-2">{f(ui.sync_failed, { e: reason })}</span>}
+            : <span className="font-medium mob:line-clamp-2">{f(ui.sync_failed, { e: reason })}</span>}
         </p>
         <div className="ms-auto flex shrink-0 items-center gap-2">
           {toggle(ui.sync_log)}
@@ -320,6 +341,7 @@ function SyncStrip({ sync, onShowNew }: { sync: SyncCtl; onShowNew: () => void }
 function AddLinks({ open, setOpen, links, setLinks, running, start, finalFocus }: { open: boolean; setOpen: (o: boolean) => void; links: string; setLinks: (l: string) => void; running: boolean; start: (urls: string[]) => void; finalFocus?: React.RefObject<HTMLElement | null> }) {
   const { ui } = useLang()
   const mobile = useMobile(), phone = usePhone()
+  useViewportFit(open && phone)
   const field = useRef<HTMLTextAreaElement>(null)
   const urls = links.split(/\s+/).filter((l) => LINK.test(l))
   // the field says "one per line", so count lines, not words; a line with at least one link is fine
@@ -526,9 +548,9 @@ function SourcesButton({ src, onClick, btnRef }: { src: Sources | null; onClick:
   const { ui } = useLang()
   const pending = src && [!src.telegram && 'telegram', src.tiktok === null && 'tiktok'].filter((x) => x && !src.later.includes(x as string))
   return (
-    <Button ref={btnRef} variant="outline" onClick={onClick} aria-label={pending && pending.length > 0 ? `${ui.ob_open}, ${ui.ob_pending}` : undefined} className="relative max-md:size-11 max-md:px-0">
-      <Plug aria-hidden /><span className="max-md:sr-only">{ui.ob_open}</span>
-      {pending && pending.length > 0 && <span className="size-2 rounded-full bg-foreground max-md:absolute max-md:end-2 max-md:top-2" aria-hidden />}
+    <Button ref={btnRef} variant="outline" onClick={onClick} aria-label={pending && pending.length > 0 ? `${ui.ob_open}, ${ui.ob_pending}` : undefined} className="relative mob:size-11 mob:px-0">
+      <Plug aria-hidden /><span className="mob:sr-only">{ui.ob_open}</span>
+      {pending && pending.length > 0 && <span className="size-2 rounded-full bg-foreground mob:absolute mob:end-2 mob:top-2" aria-hidden />}
     </Button>
   )
 }
@@ -538,6 +560,7 @@ function Onboarding({ open, setOpen, src, setSrc, reload, trigger, fallback }: {
 }) {
   const { ui } = useLang()
   const phone = usePhone()
+  useViewportFit(open && phone)
   const [changed, setChanged] = useState(false)
   const title = useRef<HTMLHeadingElement>(null)
   const done = () => { setChanged(true); reload() }
@@ -625,9 +648,9 @@ function ReelCard({ r, toggle, active, current, onOpen, setRef }: {
   const date = fmtDate(r.upload_date)
   return (
     <article aria-current={current ? 'true' : undefined}
-      className={cn(CARD, 'max-md:scroll-mt-[calc(var(--mh)+0.5rem)] transition-[border-color] duration-[120ms] hover:border-input has-[.card-open:focus-visible]:outline-2 has-[.card-open:focus-visible]:outline-offset-2 has-[.card-open:focus-visible]:outline-ring',
+      className={cn(CARD, 'mob:scroll-mt-[calc(var(--mh)+0.5rem)] transition-[border-color] duration-[120ms] hover:border-input has-[.card-open:focus-visible]:outline-2 has-[.card-open:focus-visible]:outline-offset-2 has-[.card-open:focus-visible]:outline-ring',
         current && 'border-foreground shadow-[inset_0_0_0_1px_var(--foreground)] hover:border-foreground')}>
-      <div aria-hidden className="relative aspect-[9/16] w-[104px] shrink-0 overflow-hidden rounded-sm bg-muted after:pointer-events-none after:absolute after:inset-0 after:rounded-sm after:shadow-[inset_0_0_0_1px_oklch(0_0_0/.1)] max-md:w-[72px] dark:after:shadow-[inset_0_0_0_1px_oklch(1_0_0/.1)]">
+      <div aria-hidden className="relative aspect-[9/16] w-[104px] shrink-0 overflow-hidden rounded-sm bg-muted after:pointer-events-none after:absolute after:inset-0 after:rounded-sm after:shadow-[inset_0_0_0_1px_oklch(0_0_0/.1)] mob:w-[72px] dark:after:shadow-[inset_0_0_0_1px_oklch(1_0_0/.1)]">
         {thumb ? <Thumb src={thumb} icon={<Film className="absolute inset-0 m-auto size-5 text-muted-foreground" />} /> : <Film className="absolute inset-0 m-auto size-5 text-muted-foreground" />}
       </div>
       <div className="flex min-w-0 max-w-[68ch] flex-1 flex-col gap-2">
@@ -640,15 +663,15 @@ function ReelCard({ r, toggle, active, current, onOpen, setRef }: {
           </h3>
           {/* phone: source and author stay together and the author takes the rest of the line; the date goes under them when it does not fit.
               From 768 the wrapper vanishes (`contents`) and the row is the same single line as before. */}
-          <div className="flex min-w-0 flex-nowrap items-center gap-x-1.5 gap-y-0.5 text-xs whitespace-nowrap text-muted-foreground max-md:flex-wrap">
-            <div className="flex max-w-full min-w-0 items-center gap-x-1.5 md:contents">
+          <div className="flex min-w-0 flex-nowrap items-center gap-x-1.5 gap-y-0.5 text-xs whitespace-nowrap text-muted-foreground mob:flex-wrap">
+            <div className="flex max-w-full min-w-0 items-center gap-x-1.5 desk:contents">
               <span className="shrink-0 rounded-sm bg-secondary px-1.5 py-0.5 font-medium text-foreground">{SOURCES[r.source] ?? r.source}</span>
               <a href={r.url} target="_blank" rel="noreferrer" aria-label={f(ui.open_reel_by, { a: r.author })} title={ui.open_reel}
-                className="relative z-10 flex min-w-0 shrink items-center hover:underline max-md:max-w-full max-md:min-w-[8rem] max-md:flex-initial pointer-coarse:before:absolute pointer-coarse:before:-inset-y-1 pointer-coarse:before:inset-x-0 pointer-coarse:before:content-['']">
+                className="relative z-10 flex min-w-0 shrink items-center hover:underline mob:max-w-full mob:min-w-[8rem] mob:flex-initial pointer-coarse:before:absolute pointer-coarse:before:-inset-y-1 pointer-coarse:before:inset-x-0 pointer-coarse:before:content-['']">
                 <span className="truncate">@{r.author}</span><ArrowUpRight aria-hidden className="size-3 shrink-0" />
               </a>
             </div>
-            {date && <><span aria-hidden className="max-md:hidden">·</span><span className="shrink-0 tabular-nums">{date}</span></>}
+            {date && <><span aria-hidden className="mob:hidden">·</span><span className="shrink-0 tabular-nums">{date}</span></>}
           </div>
         </div>
         {real(r.tags).length > 0 && (
@@ -658,7 +681,7 @@ function ReelCard({ r, toggle, active, current, onOpen, setRef }: {
         )}
         {r.summary && <p className="line-clamp-3 text-sm text-pretty">{r.summary}</p>}
         {main && (
-          <div className="flex flex-col gap-1 max-md:hidden">
+          <div className="flex flex-col gap-1 mob:hidden">
             <div className="text-sm font-medium text-muted-foreground">{main.kind.charAt(0).toUpperCase() + main.kind.slice(1)}</div>
             <p className="line-clamp-2 text-sm text-pretty">{main.text}</p>
           </div>
@@ -672,7 +695,7 @@ function ReelCard({ r, toggle, active, current, onOpen, setRef }: {
 function CardSkeleton() {
   return (
     <div aria-hidden className={CARD}>
-      <div className="aspect-[9/16] w-[104px] shrink-0 rounded-sm bg-muted max-md:w-[72px]" />
+      <div className="aspect-[9/16] w-[104px] shrink-0 rounded-sm bg-muted mob:w-[72px]" />
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div className="h-4 w-[70%] rounded-sm bg-muted" />
         <div className="h-3 w-[40%] rounded-sm bg-muted" />
@@ -878,7 +901,7 @@ function ErrorBlock({ retry }: { retry: () => void }) {
         <p className="font-semibold">{ui.load_failed_title}</p>
         <p className="text-sm text-muted-foreground">{ui.load_failed_desc}</p>
       </div>
-      <Button variant="outline" onClick={retry} className="max-sm:ms-7">{ui.retry}</Button>
+      <Button variant="outline" onClick={retry} className="phone:ms-7">{ui.retry}</Button>
     </div>
   )
 }
@@ -923,7 +946,7 @@ function CommandMenu({ api }: { api: CmdApi }) {
           <div className="flex h-10 items-center gap-2 border-b px-2">
             <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
             <CommandPrimitive.Input value={raw} onValueChange={setRaw} placeholder={ui.cmd_ph} aria-label={ui.cmd_title}
-              className="h-full min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm" />
+              className="h-full min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground desk:text-sm" />
           </div>
           <CommandList className="max-h-80 py-1">
             {empty && <CommandEmpty>{ui.cmd_empty}</CommandEmpty>}
@@ -1205,7 +1228,7 @@ function PlacesMap({ rows, sel, cluster, onSelect, onOpenReel, onMore }: {
   }, [sel])
   return (
     <div role="region" aria-label={ui.map_label}
-      className="sticky top-0 z-10 h-[220px] [grid-area:map] overflow-hidden rounded-2xl border max-md:top-(--mh) max-md:-ml-(--gl) max-md:-mr-(--gr) max-md:rounded-none max-md:border-x-0 lg:top-4 lg:z-0 lg:h-[calc(100dvh-2rem)] lg:min-h-[480px]">
+      className="sticky top-0 z-10 h-[220px] [grid-area:map] mob:h-(--map-h) overflow-hidden rounded-2xl border mob:top-(--mh) mob:-ml-(--gl) mob:-mr-(--gr) mob:rounded-none mob:border-x-0 lg:top-4 lg:z-0 lg:h-[calc(100dvh-2rem)] lg:min-h-[480px]">
       <div ref={el} className="z-0 size-full" />
     </div>
   )
@@ -1245,7 +1268,7 @@ function PlaceRowItem({ p, selected, all, compact, onSelect, onMore, onOpenReel,
     <div ref={setRef} data-selected={selected || undefined}
       className={cn('grid transition-[background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.2,0,0,1)]',
         compact
-          ? 'scroll-mt-[calc(var(--mh)+268px)] grid-cols-[minmax(0,1fr)_auto_44px] items-start gap-x-2.5 border-b py-2.5 ps-3 pe-1 last:border-b-0 data-[selected]:bg-muted data-[selected]:shadow-[inset_3px_0_0_var(--foreground)]'
+          ? 'scroll-mt-[calc(var(--mh)+var(--map-h)+48px)] grid-cols-[minmax(0,1fr)_auto_44px] items-start gap-x-2.5 border-b py-2.5 ps-3 pe-1 last:border-b-0 data-[selected]:bg-muted data-[selected]:shadow-[inset_3px_0_0_var(--foreground)]'
           : 'scroll-mt-[268px] grid-cols-[minmax(0,1fr)_auto] gap-x-1 gap-y-2 rounded-lg p-2 lg:scroll-mt-12 data-[selected]:bg-muted data-[selected]:shadow-[inset_0_0_0_1px_var(--foreground)]',
         geo && 'hover:bg-muted')}>
       {geo
@@ -1296,13 +1319,13 @@ function PlacesView({ reels, total, chips, reset, sel, setSel, onOpenReel }: {
     : <Notice icon={MapPinOff} title={ui.places_empty}><p className="max-w-[44ch] text-sm text-pretty text-muted-foreground">{ui.places_empty_desc}</p></Notice>
   return (
     <div className="grid animate-in grid-cols-[minmax(0,1fr)] gap-4 duration-300 ease-[cubic-bezier(0.2,0,0,1)] fade-in-0 [grid-template-areas:'map'_'list'] lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:[grid-template-areas:'list_map'] xl:grid-cols-[380px_minmax(0,1fr)]">
-      <div className="flex flex-col gap-3 [grid-area:list] md:gap-6">
+      <div className="flex flex-col gap-3 [grid-area:list] desk:gap-6">
         {groups.map(({ city, list }, i) => {
           const hid = `${uid}-${i}`
           const sub = [city && list[0].country, plural(ui.places_n, list.length, language)].filter(Boolean).join(' · ')
           return (
             <section key={city} aria-labelledby={hid}>
-              <h2 id={hid} className="sticky top-[220px] z-[5] flex flex-wrap items-baseline gap-x-2 bg-background pt-1 pb-2 text-lg leading-snug font-semibold max-md:pt-3 max-md:pb-1.5 max-md:text-base max-md:top-[calc(var(--mh)+220px)] lg:top-0">
+              <h2 id={hid} className="sticky top-[220px] z-[5] flex flex-wrap items-baseline gap-x-2 bg-background pt-1 pb-2 text-lg leading-snug font-semibold mob:pt-3 mob:pb-1.5 mob:text-base mob:top-[calc(var(--mh)+var(--map-h))] lg:top-0">
                 {city || ui.no_city}<span className="text-sm font-normal text-muted-foreground tabular-nums">{sub}</span>
               </h2>
               <div className={cn('flex flex-col rounded-2xl border bg-card', mobile ? 'overflow-hidden' : 'gap-0.5 p-2')}>
@@ -1367,7 +1390,7 @@ function Snippet({ text, re }: { text: string; re: RegExp | null }) {
   return <>{a > 0 && '…'}<Highlight text={t.slice(a, b)} re={re} />{b < t.length && '…'}</>
 }
 
-const TAP = 'max-sm:size-11'
+const TAP = 'phone:size-11'
 const OUTLINE = 'after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_1px_oklch(0_0_0/.1)] dark:after:shadow-[inset_0_0_0_1px_oklch(1_0_0/.1)]'
 
 function Block({ title, extra, children }: { title: string; extra?: React.ReactNode; children: React.ReactNode }) {
@@ -1462,7 +1485,7 @@ function TextItem({ title, text, re, q, ocr }: { title: string; text: string; re
       <div className="grid gap-3 px-4 pb-4">
         <p className={cn('max-w-[68ch] break-words whitespace-pre-line', ocr ? 'rounded-lg bg-muted p-3 text-sm leading-[1.6]' : 'text-base text-pretty')}><Highlight text={ocr ? text.replace(/ \| /g, '\n') : text} re={re} /></p>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={doCopy} className="max-sm:h-11">
+          <Button variant="ghost" size="sm" onClick={doCopy} className="phone:h-11">
             {copy === 'ok' ? <Check aria-hidden /> : <Copy aria-hidden />}{copy === 'ok' ? ui.d_copied : ui.d_copy}
           </Button>
           <span role="status" className={cn('text-sm', copy === 'fail' ? 'text-destructive' : 'sr-only')}>{copy === 'fail' ? ui.d_copy_failed : copy === 'ok' ? ui.d_copied : ''}</span>
@@ -1477,7 +1500,7 @@ function Frame({ src, label }: { src: string; label: string }) {
   const [gone, setGone] = useState(false)
   return (
     <a hidden={gone} href={src} target="_blank" rel="noreferrer" aria-label={label}
-      className={cn('relative block aspect-[9/16] w-22 shrink-0 snap-start overflow-hidden rounded-sm bg-muted sm:w-[104px]', OUTLINE)}>
+      className={cn('relative block aspect-[9/16] w-22 shrink-0 snap-start overflow-hidden rounded-sm bg-muted wide:w-[104px]', OUTLINE)}>
       <Thumb src={src} onBroken={() => setGone(true)} />
     </a>
   )
@@ -1520,8 +1543,8 @@ function PanelBody({ r, q, active, onTag, onPlace, titleRef }: {
   const bare = !r.summary && !kinds.some(Boolean) && !extra.some(Boolean) && frames.length <= 1 && texts.length === 0
   const [broken, setBroken] = useState(false) // the cover failed to load: no play button over an empty backdrop
   return (
-    <div className="grid gap-8 p-4 sm:p-6">
-      <div className="grid grid-cols-[80px_minmax(0,1fr)] items-start gap-4 sm:grid-cols-[96px_minmax(0,1fr)]">
+    <div className="grid gap-8 p-4 wide:p-6">
+      <div className="grid grid-cols-[80px_minmax(0,1fr)] items-start gap-4 wide:grid-cols-[96px_minmax(0,1fr)]">
         <a href={r.url} target="_blank" rel="noreferrer" aria-label={f(ui.open_reel_by, { a: r.author })}
           className={cn('relative block aspect-[9/16] overflow-hidden rounded-lg bg-muted', OUTLINE)}>
           {th ? <Thumb src={th} onBroken={() => setBroken(true)} icon={<Film aria-hidden className="absolute inset-0 m-auto size-6 text-muted-foreground" />} /> : <Film aria-hidden className="absolute inset-0 m-auto size-6 text-muted-foreground" />}
@@ -1545,7 +1568,7 @@ function PanelBody({ r, q, active, onTag, onPlace, titleRef }: {
       {extra}
       {frames.length > 1 && (
         <Block title={ui.d_frames} extra={<span className="ms-2 text-base font-normal tabular-nums text-muted-foreground">{frames.length}</span>}>
-          <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:px-6">
+          <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 wide:-mx-6 wide:px-6">
             {frames.map((src, i) => <Frame key={src} src={src} label={f(ui.d_frame, { n: i + 1, m: frames.length })} />)}
           </div>
         </Block>
@@ -1589,24 +1612,24 @@ function ReelPanel({ open, r, pos, q, active, onNav, onClose, onTag, onPlace, fi
   }
   return (
     <Dialog open={open && !!r} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogPanel ref={popup} aria-labelledby="reel-title" initialFocus={title} finalFocus={finalFocus} onKeyDown={onKeyDown} className="max-sm:flex max-sm:flex-col">
+      <DialogPanel ref={popup} aria-labelledby="reel-title" initialFocus={title} finalFocus={finalFocus} onKeyDown={onKeyDown} className="phone:flex phone:flex-col">
         {r && <>
           {/* <640: full screen, "←" and "Watch" on top, Prev / N of M / Next at the bottom; from 640 the chevrons and the cross stay at the top */}
-          <div className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-card px-1 max-sm:h-[calc(3.5rem+env(safe-area-inset-top))] max-sm:pt-[env(safe-area-inset-top)] max-sm:pr-[max(0.5rem,env(safe-area-inset-right))] max-sm:pl-[max(0.25rem,env(safe-area-inset-left))] sm:px-3">
-            <Button variant="ghost" size="icon" aria-label={ui.d_back} title={ui.d_back} onClick={onClose} className="size-11 sm:hidden"><ArrowLeft aria-hidden /></Button>
-            <Button variant="ghost" size="icon" aria-label={ui.d_prev} title={ui.d_prev} aria-keyshortcuts="K" disabled={atFirst} onClick={() => onNav(-1)} className={cn(TAP, 'max-sm:hidden')}><ChevronUp aria-hidden /></Button>
-            <Button variant="ghost" size="icon" aria-label={ui.d_next} title={ui.d_next} aria-keyshortcuts="J" disabled={atLast} onClick={() => onNav(1)} className={cn(TAP, 'max-sm:hidden')}><ChevronDown aria-hidden /></Button>
-            {pos.i >= 0 && <span className="ms-1 hidden text-xs tabular-nums text-muted-foreground sm:inline">{f(ui.d_pos, { n: pos.i + 1, m: pos.n })}</span>}
+          <div className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-card px-1 phone:h-[calc(3.5rem+env(safe-area-inset-top))] phone:pt-[env(safe-area-inset-top)] phone:pr-[max(1rem,env(safe-area-inset-right))] phone:pl-[max(0.25rem,env(safe-area-inset-left))] wide:px-3">
+            <Button variant="ghost" size="icon" aria-label={ui.d_back} title={ui.d_back} onClick={onClose} className="size-11 wide:hidden"><ArrowLeft aria-hidden /></Button>
+            <Button variant="ghost" size="icon" aria-label={ui.d_prev} title={ui.d_prev} aria-keyshortcuts="K" disabled={atFirst} onClick={() => onNav(-1)} className={cn(TAP, 'phone:hidden')}><ChevronUp aria-hidden /></Button>
+            <Button variant="ghost" size="icon" aria-label={ui.d_next} title={ui.d_next} aria-keyshortcuts="J" disabled={atLast} onClick={() => onNav(1)} className={cn(TAP, 'phone:hidden')}><ChevronDown aria-hidden /></Button>
+            {pos.i >= 0 && <span className="ms-1 hidden text-xs tabular-nums text-muted-foreground wide:inline">{f(ui.d_pos, { n: pos.i + 1, m: pos.n })}</span>}
             <span className="flex-1" />
             <a href={r.url} target="_blank" rel="noreferrer" aria-label={f(ui.d_watch_on, { s: SOURCES[r.source] ?? r.source })}
-              className={cn(buttonVariants(), 'max-sm:h-11')}>{ui.d_watch}<Ext /></a>
-            <DialogClose render={<Button variant="ghost" size="icon" aria-label={ui.close} title={ui.close} className={cn(TAP, 'max-sm:hidden')} />}><X aria-hidden /></DialogClose>
+              className={cn(buttonVariants(), 'phone:h-11')}>{ui.d_watch}<Ext /></a>
+            <DialogClose render={<Button variant="ghost" size="icon" aria-label={ui.close} title={ui.close} className={cn(TAP, 'phone:hidden')} />}><X aria-hidden /></DialogClose>
           </div>
-          <div className="max-sm:flex-1"><PanelBody key={r.id} r={r} q={q} active={active} onTag={onTag} onPlace={onPlace} titleRef={title} /></div>
-          <div className="sticky bottom-0 z-10 flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-center justify-between border-t bg-card pr-[max(0.5rem,env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[max(0.5rem,env(safe-area-inset-left))] sm:hidden">
-            <Button variant="ghost" title={ui.d_prev} aria-keyshortcuts="K" disabled={atFirst} onClick={() => onNav(-1)} className="max-sm:h-11"><ChevronLeft aria-hidden />{ui.d_prev_short}</Button>
+          <div className="phone:flex-1"><PanelBody key={r.id} r={r} q={q} active={active} onTag={onTag} onPlace={onPlace} titleRef={title} /></div>
+          <div className="sticky bottom-0 z-10 flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-center justify-between border-t bg-card pr-[max(0.5rem,env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[max(0.5rem,env(safe-area-inset-left))] wide:hidden">
+            <Button variant="ghost" title={ui.d_prev} aria-keyshortcuts="K" disabled={atFirst} onClick={() => onNav(-1)} className="phone:h-11"><ChevronLeft aria-hidden />{ui.d_prev_short}</Button>
             {pos.i >= 0 && <span className="text-xs tabular-nums text-muted-foreground">{f(ui.d_pos, { n: pos.i + 1, m: pos.n })}</span>}
-            <Button variant="ghost" title={ui.d_next} aria-keyshortcuts="J" disabled={atLast} onClick={() => onNav(1)} className="max-sm:h-11">{ui.d_next_short}<ChevronRight aria-hidden /></Button>
+            <Button variant="ghost" title={ui.d_next} aria-keyshortcuts="J" disabled={atLast} onClick={() => onNav(1)} className="phone:h-11">{ui.d_next_short}<ChevronRight aria-hidden /></Button>
           </div>
         </>}
       </DialogPanel>
@@ -1877,13 +1900,13 @@ function Main() {
       <span role="status" className="flex items-center gap-1.5 pe-1.5 text-xs whitespace-nowrap text-muted-foreground empty:sr-only">
         {searching && <><LoaderCircle aria-hidden className="size-3.5 motion-safe:animate-spin" />{ui.searching}</>}
       </span>
-      {!searching && <kbd aria-hidden className="inline-flex h-[22px] items-center rounded-sm border px-1.5 font-sans text-xs text-muted-foreground max-md:hidden pointer-coarse:hidden">{isMac() ? '⌘K' : 'Ctrl K'}</kbd>}
+      {!searching && <kbd aria-hidden className="inline-flex h-[22px] items-center rounded-sm border px-1.5 font-sans text-xs text-muted-foreground mob:hidden pointer-coarse:hidden">{isMac() ? '⌘K' : 'Ctrl K'}</kbd>}
     </div>
   )
   const mTags = hasReels && d.tags.filter(([t, n]) => n >= MIN_TAG || active.has(t))
 
   return (
-    <div className="mx-auto max-w-[86rem] px-4 py-3 max-md:pt-0 max-md:pr-(--gr) max-md:pl-(--gl) md:px-6 md:py-6 min-[1200px]:px-8">
+    <div className="mx-auto max-w-[86rem] px-4 py-3 mob:pt-0 mob:pr-(--gr) mob:pl-(--gl) desk:px-6 desk:py-6 min-[1200px]:px-8">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-10 focus:rounded-lg focus:bg-card focus:px-3 focus:py-2">{ui.skip}</a>
       <div role="status" className="sr-only">{liveText}</div>
       {mobile ? <>
@@ -1912,18 +1935,18 @@ function Main() {
         {/* the count of the search, right under the header; the plain count lives next to the title */}
         <p aria-hidden className="-mt-1 mb-3 text-xs text-muted-foreground tabular-nums empty:hidden">{showSearch ? countText : ''}</p>
       </> : (
-      <header className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 transition-[margin-bottom] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none', tight ? 'mb-3 duration-200 md:mb-4' : 'mb-3 duration-150 md:mb-6')}>
+      <header className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 transition-[margin-bottom] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none', tight ? 'mb-3 duration-200 desk:mb-4' : 'mb-3 duration-150 desk:mb-6')}>
         <div className="flex items-baseline">
           <h1 className="text-xl font-semibold">{ui.title}</h1>
           <span role="status" className="ms-1.5 text-sm font-normal tabular-nums text-muted-foreground">{countText}</span>
         </div>
-        <ModeSwitch mode={mode} setMode={setMode} className="max-md:hidden" />
+        <ModeSwitch mode={mode} setMode={setMode} className="mob:hidden" />
         <div className="ms-auto flex items-center gap-2">
           <ThemeSelect theme={theme} setTheme={setTheme} />
           <SourcesButton src={sources.src} onClick={() => setSourcesOpen(true)} btnRef={sourcesBtn} />
           <AddLinks open={addOpen} setOpen={setAddOpen} links={links} setLinks={setLinks} running={sync.running} start={sync.start} />
-          <Button disabled={sync.running} focusableWhenDisabled onClick={() => sync.start([])} className="max-md:size-11 max-md:px-0">
-            <RefreshCw aria-hidden className={sync.running ? 'motion-safe:animate-spin' : ''} /><span className="max-md:sr-only">{ui.sync}</span>
+          <Button disabled={sync.running} focusableWhenDisabled onClick={() => sync.start([])} className="mob:size-11 mob:px-0">
+            <RefreshCw aria-hidden className={sync.running ? 'motion-safe:animate-spin' : ''} /><span className="mob:sr-only">{ui.sync}</span>
           </Button>
         </div>
       </header>)}
@@ -1936,14 +1959,14 @@ function Main() {
             animate={reduce ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
             exit={reduce ? { opacity: 0, transition: { duration: 0.15, ease: EASE } } : { height: 0, opacity: 0, transition: { duration: 0.15, ease: EASE } }}
             transition={{ duration: 0.2, ease: EASE }}>
-            <div className="pb-3 md:pb-4"><SyncStrip sync={sync} onShowNew={showNew} /></div>
+            <div className="pb-3 desk:pb-4"><SyncStrip sync={sync} onShowNew={showNew} /></div>
           </m.div>
         )}
       </AnimatePresence></LazyMotion>
 
       <div className="flex items-start gap-6">
         {controls && (!hasReels || hasFacets) && (
-          <aside aria-label={ui.filters} className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-62 shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain rounded-2xl border bg-card p-2 md:flex">
+          <aside aria-label={ui.filters} className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-62 shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain rounded-2xl border bg-card p-2 desk:flex">
             {hasReels ? <>
               {filtered && (
                 <div className="flex items-center justify-between ps-2">
@@ -1960,11 +1983,11 @@ function Main() {
           </aside>
         )}
 
-        <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col gap-4 outline-none max-md:pb-[calc(3.5rem+env(safe-area-inset-bottom)+1rem)]">
+        <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col gap-4 outline-none mob:pb-[calc(3.5rem+env(safe-area-inset-bottom)+1rem)]">
           {controls && !mobile && (
             <div className="flex gap-2">
               {searchBox}
-              {mode === 'reels' && hasReels && <div className="max-md:hidden"><SortSelect sort={sort} setSort={setSort} relevance={relevance} /></div>}
+              {mode === 'reels' && hasReels && <div className="mob:hidden"><SortSelect sort={sort} setSort={setSort} relevance={relevance} /></div>}
             </div>
           )}
           <p role="status" className="-mt-2 text-xs text-muted-foreground empty:sr-only">{semError ? ui.sem_failed : ''}</p>
@@ -2059,7 +2082,7 @@ export default function App() {
   )
   // language is loading: header skeleton instead of a white page
   return (
-    <div className="mx-auto max-w-[86rem] px-4 py-3 md:px-6 md:py-6 min-[1200px]:px-8">
+    <div className="mx-auto max-w-[86rem] px-4 py-3 desk:px-6 desk:py-6 min-[1200px]:px-8">
       <p role="status" className="sr-only">{FAIL.loading}</p>
       <div aria-hidden className="flex flex-wrap items-center justify-between gap-2">
         <div className="h-7 w-24 rounded-sm bg-muted" />
