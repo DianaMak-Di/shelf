@@ -73,6 +73,10 @@
   --overlay: oklch(0 0 0 / .3);
   --elev-1: 0 1px 2px oklch(0 0 0 / .06), 0 4px 16px oklch(0 0 0 / .08);
   --elev-2: 0 8px 32px oklch(0 0 0 / .16);
+  /* phone (<768): page side margins with the notch, sticky header height. Physical left/right on purpose: safe-area insets are physical. */
+  --gl: max(1rem, env(safe-area-inset-left));
+  --gr: max(1rem, env(safe-area-inset-right));
+  --mh: calc(3.25rem + env(safe-area-inset-top));
 }
 .dark {
   color-scheme: dark;
@@ -132,3 +136,15 @@
 /* selected place: dark outline (tiles are light in both themes, so not --foreground); the dash of an approximate marker stays */
 .map-marker--sel { stroke: oklch(.21 .01 260); stroke-width: 3; fill-opacity: 1; }
 .map-marker--approx.map-marker--sel { fill-opacity: .2; }
+
+/* bottom tabs go away while a text field has focus (the iOS keyboard would carry a fixed bar up, Android would give it 56px) */
+@media (max-width: 767px) {
+  html:has(:is(input:not([type=checkbox], [type=radio]), textarea, [contenteditable]):focus) [data-tabbar] { display: none; }
+}
+/* 44px map zoom on touch screens */
+@media (pointer: coarse) {
+  .leaflet-touch .leaflet-bar a { width: 44px; height: 44px; line-height: 44px; font-size: 20px; }
+}
+/* cluster of places (<768): the 44px box is the hit area, the circle inside is 32px+ */
+.map-cluster { display: grid; place-items: center; background: none; border: 0; }
+.map-cluster span { display: grid; place-items: center; min-width: 32px; height: 32px; padding: 0 6px; border: 2px solid oklch(1 0 0); border-radius: 9999px; background: var(--primary); color: var(--primary-foreground); font-size: .75rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }

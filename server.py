@@ -1,8 +1,11 @@
 """Local server for the Shelf UI:  python server.py  ->  http://localhost:8765
 GET /api/reels, GET /api/lang (language + UI texts), GET /api/sync (status), POST /api/sync {"urls":[...]} (add links + process everything new).
 Onboarding: GET /api/sources (+ saved Obsidian folder), POST /api/obsidian {"path"} (save the folder, export), POST /api/telegram/<code|sign_in|password|logout>, POST /api/tiktok (export file), POST /api/later {"item"}.
-POSTs need the header X-Shelf: 1. Any request needs Host localhost:<port> or 127.0.0.1:<port> (DNS rebinding)."""
-import json, subprocess, time, urllib.parse, threading, mimetypes
+POSTs need the header X-Shelf: 1. Any request needs Host localhost:<port> or 127.0.0.1:<port> (DNS rebinding).
+--lan: listen on 0.0.0.0 for a phone on the same Wi-Fi. Loopback clients work as before; everyone else needs the secret
+token printed at start (/?k=<token> sets an HttpOnly cookie, later requests are checked by the cookie)."""
+import argparse, ipaddress, json, secrets, socket, subprocess, time, urllib.parse, threading, mimetypes
+from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 import shelf
@@ -38,7 +41,23 @@ def sync(urls):
         state["running"] = False
 
 
+def lan_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))  # UDP connect sends nothing; it only picks the outgoing interface
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+
+def same(a, b):  # constant time; bytes, because compare_digest rejects non-ASCII str
+    return secrets.compare_digest(a.encode(), b.encode())
+
+
 class H(BaseHTTPRequestHandler):
+    token = None      # set with --lan: non-loopback clients get in only with it
+    lan_hosts = set()  # extra allowed Host values ("ip:port") with --lan
+
     def send(self, body, ctype="application/json", code=200):
         body = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code); self.send_header("Content-Type", ctype)
@@ -46,14 +65,40 @@ class H(BaseHTTPRequestHandler):
 
     def allowed(self, post=False):
         # DNS rebinding: a page on evil.com rebound to 127.0.0.1 still sends Host: evil.com (and Origin on POST)
-        hosts = {f"localhost:{self.server.server_address[1]}", f"127.0.0.1:{self.server.server_address[1]}"}
+        port = self.server.server_address[1]
+        hosts = {f"localhost:{port}", f"127.0.0.1:{port}"} | self.lan_hosts
         origin = self.headers.get("Origin")
         return self.headers.get("Host") in hosts and not (post and origin and origin not in {f"http://{h}" for h in hosts})
+
+    def log_message(self, fmt, *args):  # the token is in the first GET line: keep it out of the log
+        msg = fmt % args
+        BaseHTTPRequestHandler.log_message(self, "%s", msg.replace(self.token, "***") if self.token else msg)
+
+    def remote(self):
+        return self.client_address[0]
+
+    def trusted(self):
+        if ipaddress.ip_address(self.remote()).is_loopback:
+            return True
+        try:
+            c = SimpleCookie(self.headers.get("Cookie", "")).get("shelf_k")
+        except Exception:  # noqa: BLE001  malformed Cookie header
+            return False
+        return bool(self.token and c and same(c.value, self.token))
 
     def do_GET(self):
         if not self.allowed():
             return self.send({"error": "forbidden"}, code=403)
         path = self.path.split("?")[0]
+        if not self.trusted():
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if not (self.token and same(q.get("k", [""])[0], self.token)):
+                return self.send({"error": "forbidden"}, code=403)
+            self.send_response(302)  # right key: set the cookie, go to "/" (a fixed target: no open redirect via the path)
+            self.send_header("Set-Cookie", f"shelf_k={self.token}; Path=/; HttpOnly; SameSite=Strict")
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0"); self.end_headers()
+            return
         if path == "/api/reels":
             return self.send(shelf.export_items())
         if path == "/api/lang":
@@ -75,7 +120,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         # custom header = browsers send a CORS preflight first, which this server never answers: other sites open in
         # the browser cannot post here (log in to Telegram, start syncs)
-        if self.headers.get("X-Shelf") != "1" or not self.allowed(post=True):
+        if self.headers.get("X-Shelf") != "1" or not self.allowed(post=True) or not self.trusted():
             return self.send({"error": "forbidden"}, code=403)
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path == "/api/tiktok":
@@ -119,6 +164,18 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--lan", action="store_true", help="listen on the local network (phone on the same Wi-Fi), access by secret link")
+    host, port = "127.0.0.1", 8765
+    if ap.parse_args().lan:
+        try:
+            ip = lan_ip()
+        except OSError as e:
+            raise SystemExit(f"--lan: cannot find the LAN address ({e})")
+        host, H.token, H.lan_hosts = "0.0.0.0", secrets.token_urlsafe(32), {f"{ip}:{port}"}
     threading.Thread(target=lambda: shelf.search("warmup"), daemon=True).start()  # load model + index before first query
-    print("http://localhost:8765")
-    ThreadingHTTPServer(("127.0.0.1", 8765), H).serve_forever()
+    print(f"http://localhost:{port}")
+    if H.token:
+        print(f"On the phone (same Wi-Fi): http://{ip}:{port}/?k={H.token}")
+        print("Warning: open only on a trusted network and do not share this link. The link works until the server stops.")
+    ThreadingHTTPServer((host, port), H).serve_forever()

@@ -24,6 +24,8 @@ git clone https://github.com/DianaMak-Di/shelf.git && cd shelf
 .venv/bin/python server.py   # http://localhost:8765
 ```
 
+To open the app from a phone on the same Wi-Fi, run `.venv/bin/python server.py --lan` and open the printed link (it contains a secret key, new on every start). Use it only on a trusted network (not public Wi-Fi) and do not share the link.
+
 Add videos in the UI with "+" (paste links, one per line), or put links into `urls.txt`, then press Sync. To use browser cookies for the download step, run `python shelf.py fetch urls.txt --cookies chrome` once by hand.
 
 ## Sources
